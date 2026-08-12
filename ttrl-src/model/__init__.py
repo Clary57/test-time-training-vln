@@ -1,0 +1,2 @@
+from .navida_aq import NaVIDAAQQwen2_5_VLForConditionalGeneration
+from .navida_with_adapter import NaVIDAWithAdapterQwen2_5_VLForConditionalGeneration
