@@ -1,0 +1,6 @@
+# 实验结果输出
+/results/
+/eval_log/
+/ttrl-src/results/
+# original work
+/ori_ttrl-src/

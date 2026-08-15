@@ -1,3 +1,4 @@
+import base64
 import json
 import numpy as np
 from habitat import Env
@@ -5,6 +6,7 @@ from habitat.core.agent import Agent
 from tqdm import trange
 import os, io
 import re
+import sys
 import torch
 import cv2
 import imageio
@@ -22,10 +24,27 @@ from habitat.config.default_structured_configs import (
 from PIL import Image
 from qwen_vl_utils import process_vision_info
 from collections import Counter
-from peft import PeftModel
-from vllm.multimodal.utils import encode_image_base64
+from peft import LoraConfig, PeftModel, get_peft_model
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from trainer.trajectory_consensus_updater import TrajectoryConsensusUpdater
 
 SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def encode_image_base64(image):
+    """Encode a PIL image for Qwen's image_url conversation format.
+
+    Keeping this local avoids importing vLLM only for a small utility function;
+    vLLM and the pinned Transformers version need not be import-compatible for
+    Hugging Face evaluation.
+    """
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def action_id_to_str(action_id):
@@ -42,9 +61,12 @@ def action_id_to_str(action_id):
         raise ValueError(f"Invalid action ID: {action_id}")
 
 
-def seed_all():
-    np.random.seed(41)
-    random.seed(41)
+def seed_all(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -57,9 +79,34 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids):
+    """Persist this shard and the common expected ID set before resume filtering."""
+    os.makedirs(result_path, exist_ok=True)
+    manifest = {
+        "protocol": "episode-local-step-wise-ttrl",
+        "split_num": split_num,
+        "split_id": split_id,
+        "episode_ids": [str(episode.episode_id) for episode in episodes],
+        "expected_episode_ids": expected_episode_ids,
+    }
+    with open(os.path.join(result_path, "episode_manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+
+
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
-                    forward_distance, turn_angle, max_action_history, resolution_ratio) -> None:
- 
+                    forward_distance, turn_angle, max_action_history, resolution_ratio,
+                    learning_rate, weight_decay, max_grad_norm, temperature, seed,
+                    max_episodes=None, early_stop_rotation=25, early_stop_steps=400) -> None:
+    log_path = os.path.join(result_path, "log")
+    os.makedirs(log_path, exist_ok=True)
+    dataset.episodes = [
+        episode for episode in dataset.episodes
+        if not os.path.exists(os.path.join(log_path, f"stats_{episode.episode_id}.json"))
+    ]
+    if not dataset.episodes:
+        print("All episodes in this split already have results.")
+        return
+
     env = Env(config.habitat, dataset)
 
     agent = NaVIDA_Agent(model_path, 
@@ -67,28 +114,33 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         result_path, 
                         forward_distance, 
                         turn_angle, 
-                        max_action_history, 
-                        resolution_ratio, 
-                        num_generations)
+                        max_action_history,
+                        resolution_ratio,
+                        num_generations,
+                        learning_rate,
+                        weight_decay,
+                        max_grad_norm,
+                        temperature,
+                        seed)
 
     num_episodes = len(env.episodes)
     
-    EARLY_STOP_ROTATION = 25
-    EARLY_STOP_STEPS = 400
+    EARLY_STOP_ROTATION = early_stop_rotation
+    EARLY_STOP_STEPS = early_stop_steps
 
     target_key = {"distance_to_goal", "success", "spl", "path_length", "oracle_success", "ndtw"}
 
     count = 0
-    
+    if max_episodes is not None:
+        num_episodes = min(num_episodes, max_episodes)
+
     for _ in trange(num_episodes):
         obs = env.reset()
         iter_step = 0
-        agent.reset()
+        agent.reset_episode(env.current_episode.episode_id)
 
         continuse_rotation_count = 0
         last_dtg = 999
-        if os.path.exists(os.path.join(os.path.join(result_path, "log"),"stats_{}.json".format(env.current_episode.episode_id))):
-            continue
         while not env.episode_over:
             
             info = env.get_metrics()
@@ -100,10 +152,10 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                 continuse_rotation_count +=1 
             
             
-            action = agent.act(obs, info, env.current_episode.episode_id)
-
-            if continuse_rotation_count > EARLY_STOP_ROTATION or iter_step>EARLY_STOP_STEPS:
+            if continuse_rotation_count > EARLY_STOP_ROTATION or iter_step > EARLY_STOP_STEPS:
                 action = {"action": 0}
+            else:
+                action = agent.act(obs, info, env.current_episode.episode_id)
 
             iter_step+=1
             obs = env.step(action)
@@ -116,10 +168,13 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
 
         with open(os.path.join(os.path.join(result_path, "log"),"stats_{}.json".format(env.current_episode.episode_id)), "w") as f:
             json.dump(result_dict, f, indent=4)
+        agent.finish_episode()
 
 class NaVIDA_Agent(Agent):
-    def __init__(self, model_path, lora_path, result_path, forward_distance, 
-                    turn_angle, max_action_history, resolution_ratio, num_generations = 1, require_map=True):
+    def __init__(self, model_path, lora_path, result_path, forward_distance,
+                    turn_angle, max_action_history, resolution_ratio, num_generations,
+                    learning_rate, weight_decay, max_grad_norm, temperature, seed,
+                    require_map=True):
         
         print("Initialize NaVIDA")
         
@@ -130,6 +185,7 @@ class NaVIDA_Agent(Agent):
         self.resolution_ratio = resolution_ratio
         self.max_action_history = max_action_history
         self.num_generations = num_generations
+        self.seed = seed
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "video"), exist_ok=True)
@@ -141,18 +197,43 @@ class NaVIDA_Agent(Agent):
 
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_path, **model_init_kwargs)
 
-        if lora_path is not None and lora_path!= '':
-            print('Loading LoRA weights...')
-            self.model = PeftModel.from_pretrained(self.model, lora_path)
-            print('Merging LoRA weights...')
-            self.model = self.model.merge_and_unload()
-            print('Model is loaded...')
+        if lora_path is not None and lora_path != '':
+            print('Loading trainable LoRA weights...')
+            self.model = PeftModel.from_pretrained(self.model, lora_path, is_trainable=True)
+        else:
+            print('Creating a new trainable LoRA adapter...')
+            self.model = get_peft_model(
+                self.model,
+                LoraConfig(
+                    r=8,
+                    lora_alpha=8,
+                    lora_dropout=0.05,
+                    bias="none",
+                    target_modules=[
+                        "q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj",
+                    ],
+                    exclude_modules=".*visual.*",
+                ),
+            )
 
         self.device = 'cuda'
         self.model.to(self.device)
-        self.model = self.model.eval()
+        self.model.eval()
         self.processor = AutoProcessor.from_pretrained(model_path)
         self.processor.image_processor.max_pixels = 501760
+        self.updater = TrajectoryConsensusUpdater(
+            self.model,
+            self.processor,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            max_grad_norm=max_grad_norm,
+            num_generations=num_generations,
+            temperature=temperature,
+            seed=seed,
+            forward_distance=forward_distance,
+            turn_angle=turn_angle,
+        )
         print("Initialization Complete")
 
         self.promt_template = "Imagine you are a robot programmed for navigation tasks. "\
@@ -177,7 +258,7 @@ class NaVIDA_Agent(Agent):
             "role": "system",
             "content": [{"type": "text", "text": SYSTEM_PROMPT}]})
 
-        self.reset()
+        self.reset_episode_state()
 
     def uniform_sample_with_ends(self, data, n):
         # n > 2
@@ -188,7 +269,7 @@ class NaVIDA_Agent(Agent):
         return [data[i] for i in indices]
 
 
-    def predict_inference(self):
+    def build_prompt_inputs(self):
         texts = [self.processor.apply_chat_template( self.conversations, tokenize=False, add_generation_prompt=True)]
 
         image_inputs = []
@@ -203,21 +284,7 @@ class NaVIDA_Agent(Agent):
         )
 
         prompt_inputs.to(self.device)
-        with torch.inference_mode():
-            outputs = self.model.generate(
-                **prompt_inputs,
-                generation_config=self.generation_config,
-                use_model_defaults=True,
-                )
-        output_ids = outputs
-        input_token_len = prompt_inputs["input_ids"].shape[1]
-        n_diff_input_output = (prompt_inputs["input_ids"] != output_ids[:, :input_token_len]).sum().item()
-        if n_diff_input_output > 0:
-            print(f'[Warning] {n_diff_input_output} output_ids are not the same as the input_ids')
-        outputs_text = self.processor.batch_decode(output_ids[:, input_token_len:], skip_special_tokens=True)
-        outputs_text = outputs_text[0]
-        outputs_text = outputs_text.strip()
-        return outputs_text
+        return prompt_inputs
 
     def extract_multi_result(self, output):
         sub_actions = output.split(', ')
@@ -307,22 +374,31 @@ class NaVIDA_Agent(Agent):
         else:
             raise ValueError(f"Invalid action ID: {action_id}")
         
-    def reset(self):       
-        if self.require_map:
-            if len(self.topdown_map_list)!=0:
-                output_video_path = os.path.join(self.result_path, "video","{}.gif".format(self.episode_id))
-
-                imageio.mimsave(output_video_path, self.topdown_map_list)
-
+    def reset_episode_state(self):
         self.topdown_map_list = []
         self.pending_action_list = []
         self.rgb_list = []
-
-        self.conversations = []
-        self.conversations.append({
+        self.step_logs = []
+        self.decision_step = 0
+        self.conversations = [{
             "role": "system",
-            "content": [{"type": "text", "text": SYSTEM_PROMPT}]})
-        
+            "content": [{"type": "text", "text": SYSTEM_PROMPT}],
+        }]
+
+    def reset_episode(self, episode_id):
+        """Restore base LoRA/optimizer and clear all episode-local state."""
+        self.episode_id = str(episode_id)
+        self.reset_episode_state()
+        self.updater.reset_episode(self.episode_id)
+
+    def finish_episode(self):
+        if self.require_map and self.topdown_map_list:
+            output_video_path = os.path.join(self.result_path, "video", f"{self.episode_id}.gif")
+            imageio.mimsave(output_video_path, self.topdown_map_list)
+        step_log_path = os.path.join(self.result_path, "log", f"steps_{self.episode_id}.json")
+        with open(step_log_path, "w") as f:
+            json.dump(self.step_logs, f, indent=2)
+
     def act(self, observations, info, episode_id):
 
         self.episode_id = episode_id
@@ -369,52 +445,39 @@ class NaVIDA_Agent(Agent):
                 "content": content
             })
 
-        navigation = self.predict_inference()
+        update_result = self.updater.adapt_step(self.build_prompt_inputs())
+        selected_actions = update_result["selected_actions"]
+        navigation = "TTRL medoid: " + ", ".join(
+            self.action_id_to_str(action) for action in selected_actions
+        )
+        self.step_logs.append({
+            "episode_id": self.episode_id,
+            "decision_step": self.decision_step,
+            "loss": update_result["loss"],
+            "rewards": update_result["rewards"],
+            "reward_std": update_result["reward_std"],
+            "valid_count": update_result["valid_count"],
+            "adapter_norm_before": update_result["adapter_norm_before"],
+            "adapter_norm_after": update_result["adapter_norm_after"],
+            "timing": update_result["timing"],
+        })
+        self.decision_step += 1
         
         if self.require_map:
             img = self.addtext(output_im, observations["instruction"]["text"], navigation)
             self.topdown_map_list.append(img)
         
-        result = self.extract_multi_result(navigation)
-
-        select_action_idx = 3
-
-        result = result[:select_action_idx]
-        
-        for idx, (action_index,numeric) in enumerate(result):
-            pending_action_list = []
-            if action_index == 0:
-                pending_action_list.append(0)
-            elif action_index == 1:
-                for _ in range(min(3, round(numeric/self.forward_distance))):
-                    pending_action_list.append(1)
-
-            elif action_index == 2:
-                for _ in range(min(3,round(numeric/self.turn_angle))):
-                    pending_action_list.append(2)
-
-            elif action_index == 3:
-                for _ in range(min(3,round(numeric/self.turn_angle))):
-                    pending_action_list.append(3)
-            
-            if action_index is None or len(pending_action_list)==0:
-                print('random select an action')
-                action_index = random.randint(1, 3)
-                navigation = self.action_id_to_str(action_index)
-                pending_action_list.append(action_index)
-            
-            self.pending_action_list.extend(pending_action_list)
+        self.pending_action_list.extend(selected_actions)
 
         return {"action": self.pending_action_list.pop(0)}
 
 
 def main():
-    seed_all()
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--exp-config",type=str,required=True,help="path to config yaml containing info about experiment")
-    parser.add_argument("--split-num",type=int,required=True,help="chunks of evluation")
-    parser.add_argument("--split-id",type=int,required=True,help="chunks ID of evluation")
+    parser.add_argument("--split-num",type=int,default=1,help="number of deterministic episode shards")
+    parser.add_argument("--split-id",type=int,default=0,help="zero-based deterministic episode shard ID")
     parser.add_argument("--model-path",type=str,required=True,help="location of model weights")
     parser.add_argument("--lora-path",type=str,help="location of lora weights", default=None)
     parser.add_argument("--resolution-ratio",type=float,help="location of model weights",default=0.5)
@@ -422,8 +485,30 @@ def main():
     parser.add_argument("--forward-distance",type=int,help="distance that one forward action takes",default=25)
     parser.add_argument("--turn-angle",type=int,help="angle that one turn action takes",default=15)
     parser.add_argument("--max-action-history",type=int,help="the maximum num of action history",default=10)
-    parser.add_argument("--num-generations",type=int,help="whether use video or multi image",default=1)
+    parser.add_argument("--num-generations",type=int,help="number of sampled action chunks",default=8)
+    parser.add_argument("--learning-rate",type=float,default=2e-6)
+    parser.add_argument("--weight-decay",type=float,default=0.0)
+    parser.add_argument("--max-grad-norm",type=float,default=1.0)
+    parser.add_argument("--temperature",type=float,default=0.3)
+    parser.add_argument("--seed",type=int,default=41)
+    parser.add_argument("--max-episodes",type=int,default=None,
+                        help="limit this shard to a deterministic prefix for smoke tests")
+    parser.add_argument("--early-stop-rotation",type=int,default=25)
+    parser.add_argument("--early-stop-steps",type=int,default=400,
+                        help="zero permits one adaptation step before forced stop")
     args = parser.parse_args()
+
+    if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
+        raise ValueError("split-id must be in [0, split-num)")
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        raise RuntimeError("eval_ttt.py is single-process; launch ordinary Python processes, not torchrun")
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        raise RuntimeError("eval_ttt.py must not run with an initialized torch.distributed process group")
+    if args.max_episodes is not None and args.max_episodes < 1:
+        raise ValueError("max-episodes must be positive when provided")
+    if args.early_stop_rotation < 0 or args.early_stop_steps < 0:
+        raise ValueError("early-stop limits must be non-negative")
+    seed_all(args.seed)
 
     config = get_config(args.exp_config)
     with habitat.config.read_write(config):
@@ -451,11 +536,23 @@ def main():
             
     dataset = habitat.datasets.make_dataset(id_dataset=config.habitat.dataset.type, config=config.habitat.dataset)
     
-    dataset_split = dataset.get_splits(args.split_num,allow_uneven_splits=True)[args.split_id]
+    # Fixed modulo sharding is disjoint and independent of process timing.
+    all_episodes = list(dataset.episodes)
+    expected_episode_ids = [
+        str(episode.episode_id)
+        for shard_id in range(args.split_num)
+        for episode in all_episodes[shard_id::args.split_num][:args.max_episodes]
+    ]
+    dataset.episodes = all_episodes[args.split_id::args.split_num][:args.max_episodes]
+    write_episode_manifest(
+        args.result_path, args.split_num, args.split_id, dataset.episodes, expected_episode_ids
+    )
 
-    evaluate_agent(config, args.split_id, dataset_split, args.model_path, args.lora_path, args.result_path,
+    evaluate_agent(config, args.split_id, dataset, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
-                args.resolution_ratio)
+                args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
+                args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
+                args.early_stop_steps)
 
 if __name__ == "__main__":
     main()

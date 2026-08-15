@@ -79,7 +79,7 @@ VLN 模型在训练后通常固定
 
 1. **问题与框架贡献。** 将 Test-Time Reinforcement Learning 从独立语言推理扩展到生成式视觉—语言导航，建立“采样—伪奖励—策略更新—环境交互”的闭环框架。
 2. **学习信号贡献。** 提出轨迹共识伪奖励：将多个生成动作块映射为局部运动轨迹，以轨迹间 FastDTW 距离衡量共识，将离散答案 majority voting 推广为结构化轨迹空间中的软共识。
-3. **参数高效适应贡献。** 冻结视觉编码器和基础权重，仅对语言模型中的 LoRA 参数进行 episode 级持续更新，以减少可训练参数与优化器状态；这不代表整体计算高效，因为多候选生成与反向传播仍会显著增加时间和显存开销。
+3. **参数高效适应贡献。** 冻结视觉编码器和基础权重，仅在每个 episode 内更新语言模型侧 LoRA；每个新 episode 都恢复相同的基础 LoRA 和新的优化器状态。这不代表整体计算高效，因为多候选生成与反向传播仍会显著增加时间和显存开销。
 4. **实验贡献。[待实验]** 在 R2R、RxR 及受控分布偏移设置中，与冻结策略、通用 TTA 和 VLN 专用 TTA 进行比较，并系统分析奖励设计、更新协议和计算开销。
 
 如果最终实验不能覆盖多个数据集或不能稳定超过直接基线，第四点应缩小，不应写“comprehensive”或“state-of-the-art”。
@@ -97,9 +97,9 @@ VLN 模型在训练后通常固定
 ### 2.2 摘要中不能提前写的内容
 
 - 当前不能写“显著提升”“state-of-the-art”或具体百分比；现有 TTRL 日志只覆盖 R2R val-unseen 的 152 个 episode。
-- 当前不能写“每一步在线更新”；现有训练器在一个 episode（多卡时为一批并行 episode）内部累计梯度，外层优化器在该训练 step 结束后才更新。
+- 主 evaluator 已实现“每次新动作块推理后更新一次”：当前动作执行更新前采样得到的 medoid，更新后的 LoRA 仅作用于该 episode 的下一次推理。
 - 当前没有启用 KL/reference-model 约束，不能将其描述为现有稳定机制。
-- 当前没有实现参数 episodic reset；代码表现为参数跨 episode 持续保留。
+- 主协议已实现 episode reset：每个 episode 开始时恢复相同的初始 LoRA tensor，并重新创建 AdamW 以清空动量。
 
 ---
 
@@ -254,10 +254,12 @@ A_t=f_{\mathrm{act}}(y_t)=(a_{t,1},\ldots,a_{t,L}).
 需要在实验协议中严格定义参数状态：
 
 \[
-\phi_{e+1}=\operatorname{Update}(\phi_e,\mathcal{D}_e),
+\phi_{e,0}=\phi_{\mathrm{base}},
+\qquad
+\phi_{e,t+1}=\operatorname{Update}(\phi_{e,t},\mathcal{D}_{e,t}).
 \]
 
-其中 \(e\) 为 episode。**[已实现]** 当前参数跨 episode 持续保留，episode 顺序被随机打乱；没有 episodic reset。
+其中 \(e\) 为 episode。主协议为 \(\phi_{e,0}=\phi_{\mathrm{base}}\)：episode 开始时恢复同一初始 LoRA，并重建优化器；因此参数不会跨 episode、场景或 GPU 分片继承。episode ID 顺序固定，分片由其位置确定。
 
 ### 3.2 NaVIDA Base Policy
 
@@ -398,14 +400,7 @@ r_i=1-2\frac{c_i-c_{\min}}{c_{\max}-c_{\min}}.
 
 代码通过 \(\exp(\log p-\operatorname{sg}(\log p))\hat A_i\) 构造 group-relative REINFORCE/GRPO-style 的一阶策略梯度代理，其中 \(\operatorname{sg}\) 表示 stop-gradient。无效输出和已经结束的 episode 使用 mask 排除。当前实现没有启用 reference-policy KL 或 PPO clipping，因此不应直接宣称使用了完整 GRPO/PPO 算法。
 
-需要准确描述当前更新时机：
-
-- episode 内每个决策点都会计算损失并反向传播；
-- 梯度在 episode 内累积；
-- Hugging Face Trainer 的外层优化器在该 training step 返回后更新一次；
-- 多 GPU 时，每张卡并行一个 episode，需等待全局 batch 中所有 episode 结束。
-
-因此，当前方法更准确地称为 **episode-level continual test-time update**，而不是每个环境 step 后即时更新。
+更新时机严格为：每次需要生成新动作块时，先用 \(\phi_{e,t}\) 采样 \(G\) 个候选、计算损失，再执行 `zero_grad → backward → gradient clipping → optimizer.step` 得到 \(\phi_{e,t+1}\)。当前 medoid 动作来自更新前的样本，参数更新只影响下一个决策点；动作块内的 pending 原子动作不额外推理或更新。该方法称为 **episode-local step-wise TTRL**，不是跨 episode 的 continual TTA。
 
 ### 3.8 Parameter-Efficient Adaptation
 
@@ -423,7 +418,7 @@ r_i=1-2\frac{c_i-c_{\min}}{c_{\max}-c_{\min}}.
 | 学习率 | \(2\times10^{-6}\) |
 | 调度器 | constant |
 | 精度 | bfloat16 |
-| 分布式训练 | DeepSpeed ZeRO-2，4 GPU 脚本 |
+| 多 GPU | 无通信的 episode-level evaluation parallelism；每进程仅使用一张 GPU |
 
 ### 3.9 Algorithm
 
@@ -434,7 +429,7 @@ Input: pretrained NaVIDA policy πθ, LoRA parameters φ,
        test episode stream E, sample number G
 
 for each episode e in E do
-    reset environment; keep φ from previous episodes
+    reset environment; restore φ ← φbase and create a fresh optimizer
     initialize visual history H
     while episode is not terminated do
         build state s = (instruction, H, current observation)
@@ -443,11 +438,10 @@ for each episode e in E do
         project each sequence into a local kinematic trajectory
         compute pairwise FastDTW distances
         calculate trajectory-consensus rewards and group advantages
-        accumulate gradients of the group-relative policy loss
+        zero gradients; backpropagate the group-relative policy loss; update φ
         execute the medoid candidate in the environment
         append the new observation to H
     end while
-    update φ using the accumulated episode gradients
 end for
 ```
 
@@ -467,7 +461,7 @@ end for
 2. **RxR VLN-CE val-unseen**：仓库已有冻结 NaVIDA 评测日志，共 3,669 个 episode；
 3. **受控分布偏移**：视觉 corruption、相机参数变化、场景域变化或指令语言变化，至少选一种可复现设置。
 
-如果将同一个 val-unseen 流同时用于模型适应和报告，需要明确这属于 transductive/continual TTA，而非传统冻结评测。不能用适应后的模型再次从头评测同一批 episode，并将结果描述为严格 online TTA，除非单独标记为 transductive adaptation。
+如果将同一个 val-unseen 流用于 episode 内适应和报告，需要明确这是严格的 episode-local online TTA：每个 episode 的导航指标只记录一次，适应后的参数不会用于重新运行该 episode，也不会传给下一个 episode。不能将结果表述为跨测试集积累知识的 continual 或 transductive adaptation。
 
 #### Metrics
 
@@ -499,7 +493,7 @@ end for
 正文中必须回答：
 
 - 参数在每个 step、每个 episode 还是每个场景后更新？
-- 参数是否跨 episode、跨场景保留？
+- 是否在每个 episode 开始时恢复同一基础 LoRA，并清空优化器状态？
 - episode 顺序是否固定，并对所有方法完全一致？
 - 是否允许未来观察、真实距离、success、SPL 等指标参与更新？
 - 超参数在哪个 split 上选择？
@@ -558,9 +552,9 @@ end for
 
 - 不更新；
 - 每 step 更新；
-- 每 episode 更新（当前实现）；
-- episodic reset；
-- continual update；
+- 每个新动作块更新（主方法，episode reset）；
+- episode 结束后更新；
+- 逐步更新但跨 episode 持续保留（协议消融）；
 - 只更新 attention LoRA；
 - attention + MLP LoRA（当前实现）。
 
@@ -569,7 +563,7 @@ end for
 建议至少包含以下四项：
 
 1. **轨迹共识与导航正确性的相关性。** 将平均共识距离与最终 success、距离目标变化量做相关性/分桶分析。这是证明自监督信号合理性的关键。
-2. **适应过程曲线。** 按 episode 序号绘制滑动窗口 SR/SPL 和奖励均值，观察持续适应还是灾难性漂移。
+2. **适应过程曲线。** 按 episode 内决策步绘制 reward、loss、LoRA 与基础参数的距离，以及导航表现分桶；主协议不应把跨 episode 曲线解读为知识积累。
 3. **成功与失败案例。** 展示候选轨迹分布、medoid 轨迹和实际执行路径，分析共识何时有效、何时共同犯错。
 4. **效率分析。** 报告相对冻结 NaVIDA 的生成次数、每步延迟、反向传播时间、显存和总 GPU 小时。
 
@@ -599,9 +593,9 @@ end for
 1. **共识不等于正确。** 当基础策略在新域中发生系统性偏差时，多个候选可能高度一致但全部错误。
 2. **计算成本高。** 每个状态需采样 \(G\) 个生成序列、重新计算其 token log-probability 并反向传播；当前 \(G=8\)，总 FLOPs 会随 \(G\) 明显增长。候选可以批处理，因此墙钟时间不一定严格达到 8 倍，但仍显著高于单候选冻结推理；FastDTW 通常不是主要瓶颈。
 3. **局部无障碍运动学近似。** 候选轨迹投影未建模障碍物、碰撞和真实视觉变化，只描述动作的局部几何结果。
-4. **持续更新可能漂移。** 当前没有 KL、EMA teacher、源模型正则或周期重置，跨 episode 累积更新可能破坏已有能力。
+4. **局部更新仍可能漂移。** 当前没有 KL、EMA teacher 或源模型正则；尽管 episode 间恢复基础参数避免跨场景累积漂移，单个长 episode 内的错误更新仍可能破坏后续决策。
 5. **停止决策较脆弱。** 轨迹距离对“是否应该停止”的语义刻画有限，需要单独分析。
-6. **协议依赖。** continual、episodic 和 transductive TTA 的结论不可混用，测试流顺序也可能显著影响结果。
+6. **协议依赖。** episode-local、跨 episode continual 和 transductive TTA 的结论不可混用；主协议的分片数量只改变运行速度，不应改变同一 episode 的起始参数。
 
 潜在改进方向可以放在本节末尾：置信度门控、源模型 KL 正则、场景变化检测、低共识时跳过更新、视觉变化一致性或 inverse-dynamics consistency。
 
@@ -619,7 +613,7 @@ end for
 
 中文结论模板：
 
-> 本文研究生成式视觉—语言导航策略在无专家标注和无外部反馈条件下的测试时强化学习问题。我们提出基于动作轨迹共识的 TTRL 框架，通过多样化采样、局部轨迹投影和组相对伪奖励，从策略自身的动作分布中构造部署时强化信号，并以 LoRA 执行参数高效的策略梯度更新。实验在 [数据集与偏移设置] 上表明，[填写经实验支持的主要结论]。该研究说明，动作空间中的结构化自一致性可以作为序贯具身决策的测试时伪奖励，同时也揭示了共识失真、持续更新漂移和显著计算开销等仍待解决的问题。
+> 本文研究生成式视觉—语言导航策略在无专家标注和无外部反馈条件下的测试时强化学习问题。我们提出基于动作轨迹共识的 TTRL 框架，通过多样化采样、局部轨迹投影和组相对伪奖励，从策略自身的动作分布中构造部署时强化信号；每个 episode 内以 LoRA 执行逐决策步策略梯度更新，并在下一个 episode 恢复基础策略。实验在 [数据集与偏移设置] 上表明，[填写经实验支持的主要结论]。该研究说明，动作空间中的结构化自一致性可以作为序贯具身决策的测试时伪奖励，同时也揭示了共识失真、局部更新漂移和显著计算开销等仍待解决的问题。
 
 ---
 
@@ -629,7 +623,7 @@ end for
 
 - **Figure 1：方法总览。** 从视觉历史和指令，到多动作采样、轨迹投影、共识奖励、LoRA 更新与环境交互。
 - **Figure 2：轨迹共识奖励示意。** 展示 8 个候选轨迹、medoid、高/低奖励候选。
-- **Figure 3：持续适应曲线。** episode 序号—滑动窗口 SR/SPL/奖励。
+- **Figure 3：episode 内适应曲线。** 决策步—reward/loss/LoRA 距离，并按轨迹长度分桶展示导航表现。
 - **Figure 4：定性案例。** 成功案例、共同错误案例、停止失败案例。
 
 ### 主文表
@@ -643,7 +637,7 @@ end for
 
 - 完整超参数；
 - 不同 \(G\)、温度、学习率、LoRA rank 的敏感性；
-- episodic/continual/reset 协议对比；
+- episode-local reset、episode 末更新与跨 episode continual 协议对比；
 - 更多轨迹可视化；
 - 伪代码与动作解析细节；
 - 所有随机种子与置信区间。
@@ -679,10 +673,10 @@ end for
 这些问题会直接影响论文结论可信度，应优先于润色正文：
 
 1. **修正有效候选索引。** `rewards_function` 构造的 `traj_list` 长度为有效候选数 \(V\)，但 pairwise 循环当前使用 `range(G)`；一旦出现无效候选，可能越界。应统一使用 `range(V)`。
-2. **确认更新时机。** 当前代码在 episode 内多次 backward、episode 后一次 optimizer step。若论文要声称 step-wise TTA，需要修改实现并重新实验。
+2. **确认更新时机。** 主 evaluator 在每次新动作块生成后立即执行一次 optimizer step；pending 原子动作不触发额外更新。实验应验证更新次数与模型推理次数一致。
 3. **统一评测协议。** 训练阶段直接交互 R2R val-unseen；必须说明每个 episode 的指标是在更新前还是更新后产生，以及最终模型是否重新访问相同 episode。
 4. **避免测试集调参。** 学习率、温度、采样数和 LoRA rank 应在独立 validation stream 或受控开发 split 上选择。
-5. **固定 episode 顺序。** 当前数据集初始化后随机 shuffle；所有方法和随机种子需要保存并复用完全相同的 episode order。
+5. **固定 episode 顺序。** 主 evaluator 按 dataset 原始 episode ID 顺序进行确定性 modulo 分片；所有方法必须保存并复用完全相同的 episode order 与分片清单。
 6. **处理 RxR 数值异常。** 当前日志含 Inf/极大 NE 或异常 SPL；统计时应明确过滤规则并报告有效 episode 数。
 7. **补充稳定机制或稳定性证据。** 当前 KL 项和 reference model 均被注释。若不增加机制，论文应把稳定性作为实证分析而非方法贡献。
 8. **区分 action selection 与 adaptation。** 必须加入“只用 medoid 执行、不更新参数”的 baseline。
