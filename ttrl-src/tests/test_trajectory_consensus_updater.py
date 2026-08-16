@@ -51,6 +51,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             self.visual_frozen = torch.nn.Parameter(torch.tensor(3.0), requires_grad=False)
             self.register_buffer("completion_tokens", torch.tensor(completion_tokens, dtype=torch.long))
             self.register_buffer("class_offsets", torch.linspace(-1.0, 1.0, 8))
+            self.forward_use_cache = []
 
         def generate(self, input_ids, **kwargs):
             count = self.completion_tokens.numel()
@@ -60,7 +61,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             )
             return torch.cat([input_ids.repeat(count, 1), completion_ids], dim=1)
 
-        def forward(self, input_ids, attention_mask, pixel_values, image_grid_thw):
+        def forward(self, input_ids, attention_mask, pixel_values, image_grid_thw, use_cache):
+            self.forward_use_cache.append(use_cache)
             batch_size, sequence_length = input_ids.shape
             logits = (self.lora_adapter * self.class_offsets).view(1, 1, -1)
             logits = logits.expand(batch_size, sequence_length, -1)
@@ -109,6 +111,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertFalse(torch.equal(model.lora_adapter.detach(), base_adapter))
         self.assertTrue(torch.equal(model.visual_frozen.detach(), base_visual))
         self.assertTrue(updater.optimizer.state)
+        self.assertEqual(model.forward_use_cache, [False])
 
         updater.reset_episode("episode-b")
         self.assertIsNot(updater.optimizer, initial_optimizer)

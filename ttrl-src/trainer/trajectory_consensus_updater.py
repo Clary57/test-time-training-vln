@@ -139,6 +139,7 @@ class TrajectoryConsensusUpdater:
             attention_mask=attention_mask,
             pixel_values=pixel_values,
             image_grid_thw=image_grid_thw,
+            use_cache=False,
         ).logits[:, :-1, :]
         labels = input_ids[:, 1:]
         token_logps = []
