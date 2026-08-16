@@ -93,6 +93,12 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
         json.dump(manifest, f, indent=2)
 
 
+def normalize_episode_ids(dataset):
+    """Match episode IDs to the string keys produced by JSON ground-truth files."""
+    for episode in dataset.episodes:
+        episode.episode_id = str(episode.episode_id)
+
+
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
@@ -535,6 +541,7 @@ def main():
         )
             
     dataset = habitat.datasets.make_dataset(id_dataset=config.habitat.dataset.type, config=config.habitat.dataset)
+    normalize_episode_ids(dataset)
     
     # Fixed modulo sharding is disjoint and independent of process timing.
     all_episodes = list(dataset.episodes)
