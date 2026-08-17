@@ -34,6 +34,7 @@ class TrajectoryConsensusUpdater:
         num_generations: int,
         temperature: float,
         seed: int,
+        disable_update: bool = False,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -46,6 +47,7 @@ class TrajectoryConsensusUpdater:
         self.max_grad_norm = max_grad_norm
         self.num_generations = num_generations
         self.seed = seed
+        self.disable_update = disable_update
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -108,6 +110,17 @@ class TrajectoryConsensusUpdater:
             )
             return float(squared_norm.sqrt().item())
 
+    def adapter_checksum(self) -> str:
+        """Return a deterministic byte-level checksum of all trainable adapters."""
+        digest = hashlib.sha256()
+        for name, parameter in self.trainable_parameters:
+            tensor = parameter.detach().contiguous()
+            digest.update(name.encode("utf-8"))
+            digest.update(str(tensor.dtype).encode("ascii"))
+            digest.update(str(tuple(tensor.shape)).encode("ascii"))
+            digest.update(tensor.reshape(-1).view(torch.uint8).cpu().numpy().tobytes())
+        return digest.hexdigest()
+
     def _completion_mask(self, completion_ids: torch.Tensor) -> torch.Tensor:
         eos_token_id = self.processor.tokenizer.eos_token_id
         is_eos = completion_ids == eos_token_id
@@ -157,6 +170,14 @@ class TrajectoryConsensusUpdater:
             raise ValueError("Online TTRL evaluates exactly one episode/prompt at a time")
         timing: Dict[str, float] = {}
         before_norm = self.adapter_norm()
+        before_checksum = self.adapter_checksum() if self.disable_update else None
+        before_parameters = (
+            # Keep the verification snapshot off-device. Production runs are
+            # close to GPU capacity, so validation must not duplicate LoRA
+            # tensors in GPU memory.
+            [parameter.detach().cpu().clone() for _, parameter in self.trainable_parameters]
+            if self.disable_update else None
+        )
 
         generation_start = time.perf_counter()
         self.model.eval()
@@ -219,9 +240,19 @@ class TrajectoryConsensusUpdater:
             torch.nn.utils.clip_grad_norm_(
                 [parameter for _, parameter in self.trainable_parameters], self.max_grad_norm
             )
-        self.optimizer.step()
+        if not self.disable_update:
+            self.optimizer.step()
         timing["optimizer"] = time.perf_counter() - optimizer_start
         after_norm = self.adapter_norm()
+        after_checksum = self.adapter_checksum() if self.disable_update else None
+        parameters_unchanged = None
+        if self.disable_update:
+            parameters_unchanged = all(
+                torch.equal(parameter.detach().cpu(), before)
+                for (_, parameter), before in zip(self.trainable_parameters, before_parameters)
+            )
+            if not parameters_unchanged or before_checksum != after_checksum or before_norm != after_norm:
+                raise RuntimeError("LoRA parameters changed while optimizer updates were disabled")
 
         return {
             "selected_actions": selected_actions,
@@ -232,6 +263,10 @@ class TrajectoryConsensusUpdater:
             "timing": timing,
             "adapter_norm_before": before_norm,
             "adapter_norm_after": after_norm,
+            "adapter_checksum_before": before_checksum,
+            "adapter_checksum_after": after_checksum,
+            "parameters_unchanged": parameters_unchanged,
+            "update_enabled": not self.disable_update,
             "completions": completions,
         }
 

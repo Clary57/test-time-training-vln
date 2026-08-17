@@ -78,7 +78,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             "image_grid_thw": torch.zeros((1, 3), dtype=torch.long),
         }
 
-    def _updater(self, completion_tokens, completions):
+    def _updater(self, completion_tokens, completions, disable_update=False):
         model = self.FakeModel(completion_tokens)
         updater = TrajectoryConsensusUpdater(
             model,
@@ -89,6 +89,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             num_generations=len(completion_tokens),
             temperature=0.3,
             seed=123,
+            disable_update=disable_update,
         )
         return model, updater
 
@@ -166,6 +167,48 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual(result["valid_count"], 2)
         self.assertEqual(result["rewards"][2], -1.0)
         self.assertIn(result["selected_actions"], ([1], [2]))
+
+    def test_disable_update_runs_consensus_and_backward_without_optimizer_step(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+            disable_update=True,
+        )
+        updater.reset_episode("frozen-update")
+        before = {name: parameter.detach().clone() for name, parameter in model.named_parameters()}
+        step_called = False
+        original_step = updater.optimizer.step
+
+        def tracked_step(*args, **kwargs):
+            nonlocal step_called
+            step_called = True
+            return original_step(*args, **kwargs)
+
+        updater.optimizer.step = tracked_step
+        result = updater.adapt_step(self._inputs())
+
+        self.assertFalse(step_called)
+        self.assertFalse(result["update_enabled"])
+        self.assertTrue(result["parameters_unchanged"])
+        self.assertEqual(result["adapter_checksum_before"], result["adapter_checksum_after"])
+        self.assertEqual(result["adapter_norm_before"], result["adapter_norm_after"])
+        self.assertEqual(result["selected_actions"], [1])
+        self.assertEqual(len(result["rewards"]), 3)
+        self.assertIsInstance(result["loss"], float)
+        self.assertTrue(model.lora_adapter.grad is not None)
+        for name, parameter in model.named_parameters():
+            self.assertTrue(torch.equal(parameter.detach(), before[name]))
+
+    def test_default_mode_still_updates_parameters(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+        )
+        updater.reset_episode("default-update")
+        before = model.lora_adapter.detach().clone()
+        result = updater.adapt_step(self._inputs())
+        self.assertTrue(result["update_enabled"])
+        self.assertFalse(torch.equal(model.lora_adapter.detach(), before))
 
 
 class EvaluatorProtocolSourceTests(unittest.TestCase):
@@ -257,6 +300,17 @@ class EvaluatorProtocolSourceTests(unittest.TestCase):
         self.assertIn("expected_episode_ids", source)
         self.assertIn("all_episodes[shard_id::args.split_num]", source)
         self.assertIn("early_stop_steps=400", source)
+        self.assertIn('parser.add_argument("--disable-update"', source)
+
+    def test_frozen_evaluator_supports_ordered_episode_subset_without_changing_action_logic(self):
+        source = (ROOT / "eval" / "eval.py").read_text()
+        self.assertIn('parser.add_argument("--episode-ids-file"', source)
+        self.assertIn("select_episodes_in_file_order", source)
+        self.assertIn("shard_episodes", source)
+        self.assertIn("dataset_split = dataset", source)
+        self.assertIn("select_action_idx = 3", source)
+        self.assertNotIn("from vllm", source)
+        self.assertIn("def encode_image_base64(image):", source)
 
 
 class ResultAggregationTests(unittest.TestCase):

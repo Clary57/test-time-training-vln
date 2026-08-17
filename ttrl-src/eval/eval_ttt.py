@@ -108,7 +108,8 @@ def normalize_episode_ids(dataset):
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
-                    max_episodes=None, early_stop_rotation=25, early_stop_steps=400) -> None:
+                    max_episodes=None, early_stop_rotation=25, early_stop_steps=400,
+                    disable_update=False) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -133,7 +134,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         weight_decay,
                         max_grad_norm,
                         temperature,
-                        seed)
+                        seed,
+                        disable_update=disable_update)
 
     num_episodes = len(env.episodes)
     
@@ -186,7 +188,7 @@ class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance,
                     turn_angle, max_action_history, resolution_ratio, num_generations,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
-                    require_map=True):
+                    require_map=True, disable_update=False):
         
         print("Initialize NaVIDA")
         
@@ -243,6 +245,7 @@ class NaVIDA_Agent(Agent):
             num_generations=num_generations,
             temperature=temperature,
             seed=seed,
+            disable_update=disable_update,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -471,6 +474,10 @@ class NaVIDA_Agent(Agent):
             "valid_count": update_result["valid_count"],
             "adapter_norm_before": update_result["adapter_norm_before"],
             "adapter_norm_after": update_result["adapter_norm_after"],
+            "adapter_checksum_before": update_result["adapter_checksum_before"],
+            "adapter_checksum_after": update_result["adapter_checksum_after"],
+            "parameters_unchanged": update_result["parameters_unchanged"],
+            "update_enabled": update_result["update_enabled"],
             "timing": update_result["timing"],
         })
         self.decision_step += 1
@@ -510,6 +517,8 @@ def main():
     parser.add_argument("--early-stop-rotation",type=int,default=25)
     parser.add_argument("--early-stop-steps",type=int,default=400,
                         help="zero permits one adaptation step before forced stop")
+    parser.add_argument("--disable-update",action="store_true",
+                        help="run full adaptation compute but skip optimizer.step")
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -585,7 +594,7 @@ def main():
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
                 args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
                 args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
-                args.early_stop_steps)
+                args.early_stop_steps, args.disable_update)
 
 if __name__ == "__main__":
     main()

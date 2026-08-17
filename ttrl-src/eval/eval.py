@@ -1,3 +1,4 @@
+import base64
 import json
 import numpy as np
 from habitat import Env
@@ -12,6 +13,7 @@ from habitat.utils.visualizations import maps
 import random
 from transformers import Qwen2VLForConditionalGeneration, Qwen2_5_VLForConditionalGeneration, AutoProcessor, GenerationConfig
 import argparse, habitat
+from episode_subset import load_episode_ids_file, select_episodes_in_file_order, shard_episodes
 from habitat_extensions import measures, task
 from habitat_baselines.config.default import get_config
 from habitat.config.default_structured_configs import (
@@ -23,9 +25,15 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from collections import Counter
 from peft import PeftModel
-from vllm.multimodal.utils import encode_image_base64
 
 SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def encode_image_base64(image):
+    """Encode a PIL image without requiring vLLM for this small utility."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def action_id_to_str(action_id):
@@ -55,6 +63,22 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
+                           episode_ids_file_sha256, selection_seed, dataset_split):
+    os.makedirs(result_path, exist_ok=True)
+    with open(os.path.join(result_path, "episode_manifest.json"), "w") as handle:
+        json.dump({
+            "protocol": "frozen-navida-inference",
+            "split_num": split_num,
+            "split_id": split_id,
+            "episode_ids": [str(episode.episode_id) for episode in episodes],
+            "expected_episode_ids": expected_episode_ids,
+            "episode_ids_file_sha256": episode_ids_file_sha256,
+            "selection_seed": selection_seed,
+            "dataset_split": dataset_split,
+        }, handle, indent=2)
 
 
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
@@ -423,6 +447,8 @@ def main():
     parser.add_argument("--turn-angle",type=int,help="angle that one turn action takes",default=15)
     parser.add_argument("--max-action-history",type=int,help="the maximum num of action history",default=10)
     parser.add_argument("--num-generations",type=int,help="whether use video or multi image",default=1)
+    parser.add_argument("--episode-ids-file",type=str,default=None,
+                        help="JSON episode ID list to select, in the file's order")
     args = parser.parse_args()
 
     config = get_config(args.exp_config)
@@ -450,8 +476,27 @@ def main():
         )
             
     dataset = habitat.datasets.make_dataset(id_dataset=config.habitat.dataset.type, config=config.habitat.dataset)
-    
-    dataset_split = dataset.get_splits(args.split_num,allow_uneven_splits=True)[args.split_id]
+    if args.episode_ids_file is not None:
+        if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
+            raise ValueError("split-id must be in [0, split-num)")
+        for episode in dataset.episodes:
+            episode.episode_id = str(episode.episode_id)
+        requested_ids, selection_metadata, selection_sha256 = load_episode_ids_file(
+            args.episode_ids_file
+        )
+        selected = select_episodes_in_file_order(dataset.episodes, requested_ids)
+        if args.split_num > len(selected):
+            raise ValueError("episode selection would create one or more empty shards")
+        dataset.episodes = shard_episodes(selected, args.split_num, args.split_id)
+        if not dataset.episodes:
+            raise ValueError(f"selected episode shard {args.split_id} is unexpectedly empty")
+        write_episode_manifest(
+            args.result_path, args.split_num, args.split_id, dataset.episodes, requested_ids,
+            selection_sha256, selection_metadata.get("seed"), config.habitat.dataset.split
+        )
+        dataset_split = dataset
+    else:
+        dataset_split = dataset.get_splits(args.split_num,allow_uneven_splits=True)[args.split_id]
 
     evaluate_agent(config, args.split_id, dataset_split, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
