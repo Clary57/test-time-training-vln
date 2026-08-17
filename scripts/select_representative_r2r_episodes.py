@@ -76,6 +76,96 @@ def bin_scene_episodes(episodes):
     return bins
 
 
+def allocate_capacity_proportional(capacities, slots, seed, label):
+    """Largest-remainder allocation without per-scene minimums."""
+    if slots < 0 or sum(capacities.values()) < slots:
+        raise ValueError(f"insufficient {label} capacity for {slots} slots")
+    total = sum(capacities.values())
+    quotas = {scene: slots * capacity / total for scene, capacity in capacities.items()}
+    allocation = {scene: min(capacities[scene], math.floor(quota)) for scene, quota in quotas.items()}
+    remaining = slots - sum(allocation.values())
+    refill = []
+    for scene in capacities:
+        tie = hashlib.sha256(f"{seed}:quota:{label}:{scene}".encode()).hexdigest()
+        refill.append((-(quotas[scene] - math.floor(quotas[scene])), tie, scene))
+    refill.sort()
+    refill_order = []
+    while remaining:
+        progressed = False
+        for _, _, scene in refill:
+            if allocation[scene] < capacities[scene] and remaining:
+                allocation[scene] += 1
+                remaining -= 1
+                refill_order.append(scene)
+                progressed = True
+        if not progressed:
+            raise ValueError(f"unable to refill {label} allocation")
+    audit = {
+        scene: {
+            "remaining_candidates": capacities[scene],
+            "exact_quota": quotas[scene],
+            "floor_quota": math.floor(quotas[scene]),
+            "allocated": allocation[scene],
+        }
+        for scene in sorted(capacities)
+    }
+    return allocation, audit, refill_order
+
+
+def select_balanced_extension(records, old_ids, targets, seed, excluded_ids=()):
+    """Keep old IDs and draw fixed per-class additions from remaining candidates."""
+    old_ids = [str(episode_id) for episode_id in old_ids]
+    if len(old_ids) != len(set(old_ids)):
+        raise ValueError("old episode IDs must be unique")
+    by_id = {record["episode_id"]: record for record in records}
+    unknown = sorted(set(old_ids) - set(by_id))
+    if unknown:
+        raise ValueError(f"old episode IDs are absent from population: {unknown}")
+    scene_records = defaultdict(list)
+    for record in records:
+        scene_records[record["scene_id"]].append(record)
+    classified = []
+    for scene in sorted(scene_records):
+        bins = bin_scene_episodes(scene_records[scene])
+        for items in bins.values():
+            classified.extend(items)
+    old_set = set(old_ids)
+    excluded_set = old_set | {str(episode_id) for episode_id in excluded_ids}
+    available = defaultdict(lambda: defaultdict(list))
+    for record in classified:
+        if record["episode_id"] not in excluded_set:
+            available[record["path_length_bin"]][record["scene_id"]].append(record)
+    selected = []
+    class_audit = {}
+    for label in ("short", "middle", "long"):
+        slots = targets[label]
+        capacities = {scene: len(items) for scene, items in available[label].items()}
+        allocation, quota_audit, refill_order = allocate_capacity_proportional(
+            capacities, slots, seed, label
+        )
+        selected_for_class = []
+        for scene in sorted(available[label]):
+            candidates = sorted(available[label][scene], key=lambda item: item["episode_id"])
+            draw_seed = int(hashlib.sha256(f"{seed}:extend:{label}:{scene}".encode()).hexdigest()[:16], 16)
+            random.Random(draw_seed).shuffle(candidates)
+            for record in candidates[:allocation[scene]]:
+                chosen = dict(record)
+                chosen["selection_reason"] = "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+                selected_for_class.append(chosen)
+        selected_for_class.sort(key=lambda item: item["episode_id"])
+        selected.extend(selected_for_class)
+        class_audit[label] = {
+            "requested": slots,
+            "available": sum(capacities.values()),
+            "scene_quotas": quota_audit,
+            "refill_order": refill_order,
+            "selected": len(selected_for_class),
+        }
+    if len(selected) != sum(targets.values()) or len({item["episode_id"] for item in selected}) != len(selected):
+        raise ValueError("balanced extension selection validation failed")
+    return selected, class_audit
+
+
 def select(dataset_path: Path, gt_path: Path, sample_size: int, seed: int):
     payload = load_json_gz(dataset_path)
     gt = load_json_gz(gt_path)

@@ -327,6 +327,38 @@ class ResultAggregationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "multiple manifests"):
                 AGGREGATOR.aggregate_result_dirs([first, second])
 
+    def test_explicit_expected_ids_merge_historical_batches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            old = temp / "old"
+            new = temp / "new"
+            self._write_shard(old, ["a"], {"a": {"success": 1}}, ["a"])
+            self._write_shard(new, ["b"], {"b": {"success": 0}}, ["b"])
+            result = AGGREGATOR.aggregate_result_dirs([old, new], ["a", "b"])
+            self.assertEqual(result["episode_count"], 2)
+
+    def test_explicit_expected_ids_reject_missing_unexpected_and_duplicate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            one = temp / "one"
+            self._write_shard(one, ["a"], {"a": {"success": 1}}, ["a"])
+            with self.assertRaisesRegex(ValueError, "missing"):
+                AGGREGATOR.aggregate_result_dirs([one], ["a", "b"])
+            with self.assertRaisesRegex(ValueError, "outside explicit"):
+                AGGREGATOR.aggregate_result_dirs([one], ["b"])
+            with self.assertRaisesRegex(ValueError, "unique"):
+                AGGREGATOR.aggregate_result_dirs([one], ["a", "a"])
+
+    def test_default_aggregation_still_rejects_different_manifest_expectations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            old = temp / "old"
+            new = temp / "new"
+            self._write_shard(old, ["a"], {"a": {"success": 1}}, ["a"])
+            self._write_shard(new, ["b"], {"b": {"success": 0}}, ["b"])
+            with self.assertRaisesRegex(ValueError, "disagree"):
+                AGGREGATOR.aggregate_result_dirs([old, new])
+
 
 if __name__ == "__main__":
     unittest.main()
