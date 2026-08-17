@@ -14,6 +14,7 @@ from habitat.utils.visualizations import maps
 import random
 from transformers import Qwen2VLForConditionalGeneration, Qwen2_5_VLForConditionalGeneration, AutoProcessor, GenerationConfig
 import argparse, habitat
+from episode_subset import load_episode_ids_file, select_episodes_in_file_order, shard_episodes
 from habitat_extensions import measures, task
 from habitat_baselines.config.default import get_config
 from habitat.config.default_structured_configs import (
@@ -79,7 +80,9 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids):
+def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
+                           episode_ids_file_sha256=None, selection_seed=None,
+                           dataset_split=None):
     """Persist this shard and the common expected ID set before resume filtering."""
     os.makedirs(result_path, exist_ok=True)
     manifest = {
@@ -88,6 +91,9 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
         "split_id": split_id,
         "episode_ids": [str(episode.episode_id) for episode in episodes],
         "expected_episode_ids": expected_episode_ids,
+        "episode_ids_file_sha256": episode_ids_file_sha256,
+        "selection_seed": selection_seed,
+        "dataset_split": dataset_split,
     }
     with open(os.path.join(result_path, "episode_manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -499,6 +505,8 @@ def main():
     parser.add_argument("--seed",type=int,default=41)
     parser.add_argument("--max-episodes",type=int,default=None,
                         help="limit this shard to a deterministic prefix for smoke tests")
+    parser.add_argument("--episode-ids-file",type=str,default=None,
+                        help="JSON episode ID list to select, in the file's order")
     parser.add_argument("--early-stop-rotation",type=int,default=25)
     parser.add_argument("--early-stop-steps",type=int,default=400,
                         help="zero permits one adaptation step before forced stop")
@@ -512,6 +520,8 @@ def main():
         raise RuntimeError("eval_ttt.py must not run with an initialized torch.distributed process group")
     if args.max_episodes is not None and args.max_episodes < 1:
         raise ValueError("max-episodes must be positive when provided")
+    if args.episode_ids_file is not None and args.max_episodes is not None:
+        raise ValueError("episode-ids-file and max-episodes cannot be used together")
     if args.early_stop_rotation < 0 or args.early_stop_steps < 0:
         raise ValueError("early-stop limits must be non-negative")
     seed_all(args.seed)
@@ -545,14 +555,30 @@ def main():
     
     # Fixed modulo sharding is disjoint and independent of process timing.
     all_episodes = list(dataset.episodes)
-    expected_episode_ids = [
-        str(episode.episode_id)
-        for shard_id in range(args.split_num)
-        for episode in all_episodes[shard_id::args.split_num][:args.max_episodes]
-    ]
-    dataset.episodes = all_episodes[args.split_id::args.split_num][:args.max_episodes]
+    episode_ids_file_sha256 = None
+    selection_seed = None
+    if args.episode_ids_file is not None:
+        requested_ids, selection_metadata, episode_ids_file_sha256 = load_episode_ids_file(
+            args.episode_ids_file
+        )
+        all_episodes = select_episodes_in_file_order(all_episodes, requested_ids)
+        if args.split_num > len(all_episodes):
+            raise ValueError("episode selection would create one or more empty shards")
+        expected_episode_ids = requested_ids
+        selection_seed = selection_metadata.get("seed")
+        dataset.episodes = shard_episodes(all_episodes, args.split_num, args.split_id)
+        if not dataset.episodes:
+            raise ValueError(f"selected episode shard {args.split_id} is unexpectedly empty")
+    else:
+        expected_episode_ids = [
+            str(episode.episode_id)
+            for shard_id in range(args.split_num)
+            for episode in all_episodes[shard_id::args.split_num][:args.max_episodes]
+        ]
+        dataset.episodes = all_episodes[args.split_id::args.split_num][:args.max_episodes]
     write_episode_manifest(
-        args.result_path, args.split_num, args.split_id, dataset.episodes, expected_episode_ids
+        args.result_path, args.split_num, args.split_id, dataset.episodes, expected_episode_ids,
+        episode_ids_file_sha256, selection_seed, config.habitat.dataset.split
     )
 
     evaluate_agent(config, args.split_id, dataset, args.model_path, args.lora_path, args.result_path,
