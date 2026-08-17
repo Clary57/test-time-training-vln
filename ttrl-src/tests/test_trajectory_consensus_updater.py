@@ -5,6 +5,7 @@ Run with the project environment, for example:
         ttrl-src/tests/test_trajectory_consensus_updater.py
 """
 
+import ast
 import importlib.util
 import json
 import sys
@@ -51,6 +52,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             self.visual_frozen = torch.nn.Parameter(torch.tensor(3.0), requires_grad=False)
             self.register_buffer("completion_tokens", torch.tensor(completion_tokens, dtype=torch.long))
             self.register_buffer("class_offsets", torch.linspace(-1.0, 1.0, 8))
+            self.forward_use_cache = []
 
         def generate(self, input_ids, **kwargs):
             count = self.completion_tokens.numel()
@@ -60,7 +62,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             )
             return torch.cat([input_ids.repeat(count, 1), completion_ids], dim=1)
 
-        def forward(self, input_ids, attention_mask, pixel_values, image_grid_thw):
+        def forward(self, input_ids, attention_mask, pixel_values, image_grid_thw, use_cache):
+            self.forward_use_cache.append(use_cache)
             batch_size, sequence_length = input_ids.shape
             logits = (self.lora_adapter * self.class_offsets).view(1, 1, -1)
             logits = logits.expand(batch_size, sequence_length, -1)
@@ -109,6 +112,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertFalse(torch.equal(model.lora_adapter.detach(), base_adapter))
         self.assertTrue(torch.equal(model.visual_frozen.detach(), base_visual))
         self.assertTrue(updater.optimizer.state)
+        self.assertEqual(model.forward_use_cache, [False])
 
         updater.reset_episode("episode-b")
         self.assertIsNot(updater.optimizer, initial_optimizer)
@@ -165,6 +169,73 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
 
 
 class EvaluatorProtocolSourceTests(unittest.TestCase):
+    def test_evaluator_normalizes_episode_ids_before_sharding_manifest_and_environment(self):
+        source = (ROOT / "eval" / "eval_ttt.py").read_text()
+        tree = ast.parse(source)
+        functions = {
+            node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+        }
+
+        normalize_node = functions["normalize_episode_ids"]
+        namespace = {}
+        exec(
+            compile(
+                ast.fix_missing_locations(ast.Module(body=[normalize_node], type_ignores=[])),
+                filename="eval_ttt.py",
+                mode="exec",
+            ),
+            namespace,
+        )
+        episodes = [
+            SimpleNamespace(episode_id=1, marker=object()),
+            SimpleNamespace(episode_id="2", marker=object()),
+        ]
+        original_episodes = list(episodes)
+        original_markers = [episode.marker for episode in episodes]
+        dataset = SimpleNamespace(episodes=episodes)
+
+        namespace["normalize_episode_ids"](dataset)
+
+        self.assertEqual([episode.episode_id for episode in dataset.episodes], ["1", "2"])
+        self.assertEqual(dataset.episodes, original_episodes)
+        self.assertEqual([episode.marker for episode in dataset.episodes], original_markers)
+
+        main_node = functions["main"]
+        normalize_call = next(
+            node for node in ast.walk(main_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "normalize_episode_ids"
+        )
+        all_episodes_assignment = next(
+            node for node in ast.walk(main_node)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "all_episodes" for target in node.targets)
+        )
+        manifest_call = next(
+            node for node in ast.walk(main_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "write_episode_manifest"
+        )
+        evaluate_call = next(
+            node for node in ast.walk(main_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "evaluate_agent"
+        )
+        self.assertLess(normalize_call.lineno, all_episodes_assignment.lineno)
+        self.assertLess(normalize_call.lineno, manifest_call.lineno)
+        self.assertLess(normalize_call.lineno, evaluate_call.lineno)
+        self.assertTrue(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Env"
+                for node in ast.walk(functions["evaluate_agent"])
+            )
+        )
+
     def test_pending_action_fast_path_precedes_online_update(self):
         source = (ROOT / "eval" / "eval_ttt.py").read_text()
         act_start = source.index("    def act(")
