@@ -8,9 +8,11 @@ Run with the project environment, for example:
 import ast
 import importlib.util
 import json
+import random
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -228,6 +230,66 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertNotIn("selected_candidate_index", baseline_result)
         self.assertEqual(traced_result["selected_candidate_index"], 0)
         self.assertEqual(traced_result["candidate_actions"], [[1], [1], [2]])
+
+    def test_selected_candidate_index_is_computed_once_per_adapt_step(self):
+        for enabled in (False, True):
+            _, updater = self._updater(
+                [3, 3, 4],
+                {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+                trace_metadata_enabled=enabled,
+            )
+            updater.reset_episode(f"single-ranking-{enabled}")
+            original = updater._selected_candidate_index
+            calls = []
+
+            def counted(rewards, valid):
+                calls.append((list(rewards), list(valid)))
+                return original(rewards, valid)
+
+            updater._selected_candidate_index = counted
+            result = updater.adapt_step(self._inputs())
+            self.assertEqual(len(calls), 1)
+            if enabled:
+                self.assertEqual(result["selected_candidate_index"], 0)
+                self.assertEqual(result["selected_actions"], result["candidate_actions"][0])
+            else:
+                self.assertNotIn("selected_candidate_index", result)
+
+    def test_trace_on_off_valid_selection_and_rng_state_are_identical(self):
+        arguments = (
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+        )
+        results = []
+        for enabled in (False, True):
+            _, updater = self._updater(*arguments, trace_metadata_enabled=enabled)
+            updater.reset_episode("valid-rng")
+            result = updater.adapt_step(self._inputs())
+            results.append((result, random.getstate()))
+        self.assertEqual(results[0][0]["selected_actions"], results[1][0]["selected_actions"])
+        self.assertEqual(results[0][0]["rewards"], results[1][0]["rewards"])
+        self.assertEqual(results[0][1], results[1][1])
+
+    def test_trace_on_off_all_invalid_fallback_and_rng_state_are_identical(self):
+        arguments = (
+            [5, 5, 5],
+            {5: "not a navigation action"},
+        )
+        results = []
+        original_randint = random.randint
+        for enabled in (False, True):
+            _, updater = self._updater(*arguments, trace_metadata_enabled=enabled)
+            updater.reset_episode("invalid-rng")
+            with mock.patch.object(random, "randint", wraps=original_randint) as randint_mock:
+                result = updater.adapt_step(self._inputs())
+            results.append((result, random.getstate(), randint_mock.call_count))
+        self.assertEqual(results[0][0]["selected_actions"], results[1][0]["selected_actions"])
+        self.assertEqual(results[0][0]["rewards"], results[1][0]["rewards"])
+        self.assertEqual(results[0][1], results[1][1])
+        self.assertEqual(results[0][2], 1)
+        self.assertEqual(results[1][2], 1)
+        self.assertNotIn("selected_candidate_index", results[0][0])
+        self.assertIsNone(results[1][0]["selected_candidate_index"])
 
 
 class EvaluatorProtocolSourceTests(unittest.TestCase):

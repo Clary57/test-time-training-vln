@@ -201,11 +201,8 @@ class TrajectoryConsensusUpdater:
         completions = self.processor.batch_decode(completion_ids, skip_special_tokens=True)
         actions, rewards_list, valid_list = self._actions_and_rewards(completions)
         valid_count = int(sum(valid_list))
-        selected_actions = self._select_actions(actions, rewards_list, valid_list)
-        selected_candidate_index = (
-            self._selected_candidate_index(rewards_list, valid_list)
-            if self.trace_metadata_enabled else None
-        )
+        selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
+        selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
 
         loss_forward_start = time.perf_counter()
         self.model.train()
@@ -294,6 +291,12 @@ class TrajectoryConsensusUpdater:
 
     def _select_actions(self, actions: Sequence[List[int]], rewards: Sequence[float], valid: Sequence[bool]) -> List[int]:
         selected_index = self._selected_candidate_index(rewards, valid)
+        return self._actions_for_selected_index(actions, selected_index)
+
+    @staticmethod
+    def _actions_for_selected_index(
+        actions: Sequence[List[int]], selected_index: int | None
+    ) -> List[int]:
         if selected_index is None:
             # Invalid generations must never receive a gradient.  A deterministic
             # fallback still lets the environment make progress.

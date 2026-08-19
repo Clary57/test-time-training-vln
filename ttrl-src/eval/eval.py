@@ -13,6 +13,7 @@ from habitat.utils.visualizations import maps
 import random
 from transformers import Qwen2VLForConditionalGeneration, Qwen2_5_VLForConditionalGeneration, AutoProcessor, GenerationConfig
 import argparse, habitat
+import sys
 from episode_subset import load_episode_ids_file, select_episodes_in_file_order, shard_episodes
 from habitat_extensions import measures, task
 from habitat_baselines.config.default import get_config
@@ -25,6 +26,11 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from collections import Counter
 from peft import PeftModel
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from eval.stop_trace import StopTraceWriter, chunk_metadata, resolve_success_distance
 
 SYSTEM_PROMPT = "You are a helpful assistant."

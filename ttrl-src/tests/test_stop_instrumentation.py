@@ -1,4 +1,5 @@
 import importlib.util
+import importlib.machinery
 import json
 import random
 import tempfile
@@ -172,10 +173,31 @@ class StopInstrumentationTests(unittest.TestCase):
             self.assertIn('parser.add_argument("--stop-trace",action="store_true"',source)
             self.assertNotIn('default=True',source[source.index('--stop-trace'):source.index('--stop-trace')+200])
 
+    def test_frozen_evaluator_initializes_project_path_before_trace_import(self):
+        eval_dir=Path(__file__).parents[1]/"eval"
+        source=(eval_dir/"eval.py").read_text()
+        self.assertTrue((eval_dir/"__init__.py").is_file())
+        project_root=source.index("PROJECT_ROOT = os.path.dirname")
+        path_insert=source.index("sys.path.insert(0, PROJECT_ROOT)")
+        trace_import=source.index("from eval.stop_trace import")
+        self.assertLess(project_root,path_insert)
+        self.assertLess(path_insert,trace_import)
+        package_spec=importlib.machinery.PathFinder.find_spec(
+            "eval", [str(eval_dir.parent)]
+        )
+        self.assertIsNotNone(package_spec)
+        self.assertIsNotNone(package_spec.submodule_search_locations)
+        trace_spec=importlib.machinery.PathFinder.find_spec(
+            "eval.stop_trace", package_spec.submodule_search_locations
+        )
+        self.assertIsNotNone(trace_spec)
+        self.assertEqual(Path(trace_spec.origin).resolve(), (eval_dir/"stop_trace.py").resolve())
+
     def test_updater_exposes_existing_choice_without_second_ranking(self):
         source=(Path(__file__).parents[1]/"trainer"/"trajectory_consensus_updater.py").read_text()
         self.assertIn('"selected_candidate_index": selected_candidate_index',source)
-        self.assertIn("selected_actions = self._select_actions", source)
+        self.assertIn("selected_candidate_index = self._selected_candidate_index", source)
+        self.assertIn("selected_actions = self._actions_for_selected_index", source)
         self.assertIn("if self.trace_metadata_enabled", source)
 
 
