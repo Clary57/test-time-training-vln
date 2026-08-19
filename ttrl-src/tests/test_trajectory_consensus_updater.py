@@ -78,7 +78,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             "image_grid_thw": torch.zeros((1, 3), dtype=torch.long),
         }
 
-    def _updater(self, completion_tokens, completions, disable_update=False):
+    def _updater(self, completion_tokens, completions, disable_update=False,
+                 trace_metadata_enabled=False):
         model = self.FakeModel(completion_tokens)
         updater = TrajectoryConsensusUpdater(
             model,
@@ -90,6 +91,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             temperature=0.3,
             seed=123,
             disable_update=disable_update,
+            trace_metadata_enabled=trace_metadata_enabled,
         )
         return model, updater
 
@@ -209,6 +211,23 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         result = updater.adapt_step(self._inputs())
         self.assertTrue(result["update_enabled"])
         self.assertFalse(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_trace_metadata_exposes_existing_medoid_without_changing_choice(self):
+        arguments = (
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+        )
+        _, baseline = self._updater(*arguments)
+        _, traced = self._updater(*arguments, trace_metadata_enabled=True)
+        baseline.reset_episode("same")
+        traced.reset_episode("same")
+        baseline_result = baseline.adapt_step(self._inputs())
+        traced_result = traced.adapt_step(self._inputs())
+        self.assertEqual(baseline_result["selected_actions"], traced_result["selected_actions"])
+        self.assertEqual(baseline_result["rewards"], traced_result["rewards"])
+        self.assertNotIn("selected_candidate_index", baseline_result)
+        self.assertEqual(traced_result["selected_candidate_index"], 0)
+        self.assertEqual(traced_result["candidate_actions"], [[1], [1], [2]])
 
 
 class EvaluatorProtocolSourceTests(unittest.TestCase):

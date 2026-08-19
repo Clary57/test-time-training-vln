@@ -35,6 +35,7 @@ class TrajectoryConsensusUpdater:
         temperature: float,
         seed: int,
         disable_update: bool = False,
+        trace_metadata_enabled: bool = False,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -48,6 +49,7 @@ class TrajectoryConsensusUpdater:
         self.num_generations = num_generations
         self.seed = seed
         self.disable_update = disable_update
+        self.trace_metadata_enabled = trace_metadata_enabled
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -200,6 +202,10 @@ class TrajectoryConsensusUpdater:
         actions, rewards_list, valid_list = self._actions_and_rewards(completions)
         valid_count = int(sum(valid_list))
         selected_actions = self._select_actions(actions, rewards_list, valid_list)
+        selected_candidate_index = (
+            self._selected_candidate_index(rewards_list, valid_list)
+            if self.trace_metadata_enabled else None
+        )
 
         loss_forward_start = time.perf_counter()
         self.model.train()
@@ -254,7 +260,7 @@ class TrajectoryConsensusUpdater:
             if not parameters_unchanged or before_checksum != after_checksum or before_norm != after_norm:
                 raise RuntimeError("LoRA parameters changed while optimizer updates were disabled")
 
-        return {
+        result = {
             "selected_actions": selected_actions,
             "loss": float(loss.detach().item()),
             "rewards": [float(reward) for reward in rewards_list],
@@ -269,6 +275,12 @@ class TrajectoryConsensusUpdater:
             "update_enabled": not self.disable_update,
             "completions": completions,
         }
+        if self.trace_metadata_enabled:
+            result.update({
+                "candidate_actions": [list(action) for action in actions],
+                "selected_candidate_index": selected_candidate_index,
+            })
+        return result
 
     def _actions_and_rewards(self, completions: Sequence[str]) -> Tuple[List[List[int]], List[float], List[bool]]:
         actions: List[List[int]] = []
@@ -281,12 +293,21 @@ class TrajectoryConsensusUpdater:
         return actions, rewards, valid
 
     def _select_actions(self, actions: Sequence[List[int]], rewards: Sequence[float], valid: Sequence[bool]) -> List[int]:
-        valid_indices = [index for index, is_valid in enumerate(valid) if is_valid]
-        if not valid_indices:
+        selected_index = self._selected_candidate_index(rewards, valid)
+        if selected_index is None:
             # Invalid generations must never receive a gradient.  A deterministic
             # fallback still lets the environment make progress.
             return [random.randint(1, 3)]
-        return list(actions[min(valid_indices, key=lambda index: (-rewards[index], index))])
+        return list(actions[selected_index])
+
+    @staticmethod
+    def _selected_candidate_index(
+        rewards: Sequence[float], valid: Sequence[bool]
+    ) -> int | None:
+        valid_indices = [index for index, is_valid in enumerate(valid) if is_valid]
+        if not valid_indices:
+            return None
+        return min(valid_indices, key=lambda index: (-rewards[index], index))
 
     def _parse_action_chunk(self, completion: str) -> Tuple[List[int], bool]:
         actions: List[int] = []

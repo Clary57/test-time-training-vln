@@ -32,6 +32,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from trainer.trajectory_consensus_updater import TrajectoryConsensusUpdater
+from eval.stop_trace import StopTraceWriter, chunk_metadata, resolve_success_distance
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -109,7 +110,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
                     max_episodes=None, early_stop_rotation=25, early_stop_steps=400,
-                    disable_update=False) -> None:
+                    disable_update=False, stop_trace=False) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -135,7 +136,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         max_grad_norm,
                         temperature,
                         seed,
-                        disable_update=disable_update)
+                        disable_update=disable_update,
+                        stop_trace_enabled=stop_trace)
 
     num_episodes = len(env.episodes)
     
@@ -143,6 +145,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
     EARLY_STOP_STEPS = early_stop_steps
 
     target_key = {"distance_to_goal", "success", "spl", "path_length", "oracle_success", "ndtw"}
+    success_distance = resolve_success_distance(config) if stop_trace else None
 
     count = 0
     if max_episodes is not None:
@@ -152,6 +155,13 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
         obs = env.reset()
         iter_step = 0
         agent.reset_episode(env.current_episode.episode_id)
+        trace_writer = None
+        if stop_trace:
+            trace_writer = StopTraceWriter(
+                os.path.join(log_path, f"stop_trace_{env.current_episode.episode_id}.jsonl"),
+                env.current_episode.episode_id,
+                success_distance,
+            )
 
         continuse_rotation_count = 0
         last_dtg = 999
@@ -166,13 +176,44 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                 continuse_rotation_count +=1 
             
             
-            if continuse_rotation_count > EARLY_STOP_ROTATION or iter_step > EARLY_STOP_STEPS:
+            early_rotation_override = continuse_rotation_count > EARLY_STOP_ROTATION
+            max_step_override = iter_step > EARLY_STOP_STEPS
+            if early_rotation_override or max_step_override:
                 action = {"action": 0}
+                action_trace = {
+                    "agent_action": None,
+                    "action_source": "max_step_override" if max_step_override else "early_rotation_override",
+                    "pending_before": len(agent.pending_action_list),
+                    "pending_after": len(agent.pending_action_list),
+                    "metadata": None,
+                }
             else:
                 action = agent.act(obs, info, env.current_episode.episode_id)
+                action_trace = agent.consume_action_trace_metadata() if stop_trace else None
 
             iter_step+=1
             obs = env.step(action)
+            if trace_writer is not None:
+                after_info = env.get_metrics()
+                trace_writer.record(
+                    distance_before=info["distance_to_goal"],
+                    distance_after=after_info["distance_to_goal"],
+                    episode_over_before=False,
+                    episode_over_after=env.episode_over,
+                    agent_action=action_trace["agent_action"],
+                    action_source=action_trace["action_source"],
+                    overridden_action=None,
+                    override_reason=(
+                        "max_step" if max_step_override else
+                        "early_rotation" if early_rotation_override else None
+                    ),
+                    executed_action=action["action"],
+                    pending_before=action_trace["pending_before"],
+                    pending_after=action_trace["pending_after"],
+                    metadata=action_trace["metadata"],
+                    early_rotation_override=early_rotation_override,
+                    max_step_override=max_step_override,
+                )
             
         info = env.get_metrics()
         result_dict = dict()
@@ -183,12 +224,14 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
         with open(os.path.join(os.path.join(result_path, "log"),"stats_{}.json".format(env.current_episode.episode_id)), "w") as f:
             json.dump(result_dict, f, indent=4)
         agent.finish_episode()
+        if trace_writer is not None:
+            trace_writer.close()
 
 class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance,
                     turn_angle, max_action_history, resolution_ratio, num_generations,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
-                    require_map=True, disable_update=False):
+                    require_map=True, disable_update=False, stop_trace_enabled=False):
         
         print("Initialize NaVIDA")
         
@@ -200,6 +243,7 @@ class NaVIDA_Agent(Agent):
         self.max_action_history = max_action_history
         self.num_generations = num_generations
         self.seed = seed
+        self.stop_trace_enabled = stop_trace_enabled
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "video"), exist_ok=True)
@@ -246,6 +290,7 @@ class NaVIDA_Agent(Agent):
             temperature=temperature,
             seed=seed,
             disable_update=disable_update,
+            trace_metadata_enabled=stop_trace_enabled,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -395,6 +440,9 @@ class NaVIDA_Agent(Agent):
         self.rgb_list = []
         self.step_logs = []
         self.decision_step = 0
+        if self.stop_trace_enabled:
+            self.trace_metadata_queue = []
+            self.last_action_trace_metadata = None
         self.conversations = [{
             "role": "system",
             "content": [{"type": "text", "text": SYSTEM_PROMPT}],
@@ -433,7 +481,18 @@ class NaVIDA_Agent(Agent):
             output_im = np.concatenate((rgb, top_down_map), axis=1)
 
         if len(self.pending_action_list) != 0 :
+            pending_before = len(self.pending_action_list)
             temp_action = self.pending_action_list.pop(0)
+            if self.stop_trace_enabled:
+                metadata = self.trace_metadata_queue.pop(0)
+                metadata = {**metadata, "agent_action_source": "pending"}
+                self.last_action_trace_metadata = {
+                    "agent_action": temp_action,
+                    "action_source": "pending",
+                    "pending_before": pending_before,
+                    "pending_after": len(self.pending_action_list),
+                    "metadata": metadata,
+                }
             
             if self.require_map:
                 img = self.addtext(output_im, observations["instruction"]["text"], "Pending action: {}".format(temp_action))
@@ -462,6 +521,7 @@ class NaVIDA_Agent(Agent):
 
         update_result = self.updater.adapt_step(self.build_prompt_inputs())
         selected_actions = update_result["selected_actions"]
+        decision_id = self.decision_step
         navigation = "TTRL medoid: " + ", ".join(
             self.action_id_to_str(action) for action in selected_actions
         )
@@ -487,8 +547,34 @@ class NaVIDA_Agent(Agent):
             self.topdown_map_list.append(img)
         
         self.pending_action_list.extend(selected_actions)
+        pending_before = len(self.pending_action_list)
+        if self.stop_trace_enabled:
+            self.trace_metadata_queue.extend(chunk_metadata(
+                episode_id=str(self.episode_id),
+                decision_id=decision_id,
+                selected_chunk=selected_actions,
+                raw_model_outputs=update_result["completions"],
+                parsed_candidate_chunks=update_result["candidate_actions"],
+                candidate_rewards=update_result["rewards"],
+                selected_index=update_result["selected_candidate_index"],
+            ))
+        action = self.pending_action_list.pop(0)
+        if self.stop_trace_enabled:
+            metadata = self.trace_metadata_queue.pop(0)
+            metadata = {**metadata, "agent_action_source": "generated"}
+            self.last_action_trace_metadata = {
+                "agent_action": action,
+                "action_source": "generated",
+                "pending_before": pending_before,
+                "pending_after": len(self.pending_action_list),
+                "metadata": metadata,
+            }
+        return {"action": action}
 
-        return {"action": self.pending_action_list.pop(0)}
+    def consume_action_trace_metadata(self):
+        metadata = self.last_action_trace_metadata
+        self.last_action_trace_metadata = None
+        return metadata
 
 
 def main():
@@ -519,6 +605,8 @@ def main():
                         help="zero permits one adaptation step before forced stop")
     parser.add_argument("--disable-update",action="store_true",
                         help="run full adaptation compute but skip optimizer.step")
+    parser.add_argument("--stop-trace",action="store_true",
+                        help="write default-off atomic action provenance JSONL")
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -594,7 +682,7 @@ def main():
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
                 args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
                 args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
-                args.early_stop_steps, args.disable_update)
+                args.early_stop_steps, args.disable_update, args.stop_trace)
 
 if __name__ == "__main__":
     main()

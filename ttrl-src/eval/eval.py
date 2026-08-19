@@ -25,6 +25,7 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from collections import Counter
 from peft import PeftModel
+from eval.stop_trace import StopTraceWriter, chunk_metadata, resolve_success_distance
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -82,7 +83,8 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
 
 
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
-                    forward_distance, turn_angle, max_action_history, resolution_ratio) -> None:
+                    forward_distance, turn_angle, max_action_history, resolution_ratio,
+                    stop_trace=False) -> None:
  
     env = Env(config.habitat, dataset)
 
@@ -93,7 +95,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         turn_angle, 
                         max_action_history, 
                         resolution_ratio, 
-                        num_generations)
+                        num_generations,
+                        stop_trace_enabled=stop_trace)
 
     num_episodes = len(env.episodes)
     
@@ -101,6 +104,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
     EARLY_STOP_STEPS = 400
 
     target_key = {"distance_to_goal", "success", "spl", "path_length", "oracle_success", "ndtw"}
+    success_distance = resolve_success_distance(config) if stop_trace else None
 
     count = 0
     
@@ -113,6 +117,13 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
         last_dtg = 999
         if os.path.exists(os.path.join(os.path.join(result_path, "log"),"stats_{}.json".format(env.current_episode.episode_id))):
             continue
+        trace_writer = None
+        if stop_trace:
+            trace_writer = StopTraceWriter(
+                os.path.join(result_path, "log", f"stop_trace_{env.current_episode.episode_id}.jsonl"),
+                env.current_episode.episode_id,
+                success_distance,
+            )
         while not env.episode_over:
             
             info = env.get_metrics()
@@ -125,12 +136,41 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
             
             
             action = agent.act(obs, info, env.current_episode.episode_id)
+            action_trace = agent.consume_action_trace_metadata() if stop_trace else None
 
-            if continuse_rotation_count > EARLY_STOP_ROTATION or iter_step>EARLY_STOP_STEPS:
+            early_rotation_override = continuse_rotation_count > EARLY_STOP_ROTATION
+            max_step_override = iter_step > EARLY_STOP_STEPS
+            original_action = action["action"]
+            if early_rotation_override or max_step_override:
                 action = {"action": 0}
 
             iter_step+=1
             obs = env.step(action)
+            if trace_writer is not None:
+                after_info = env.get_metrics()
+                trace_writer.record(
+                    distance_before=info["distance_to_goal"],
+                    distance_after=after_info["distance_to_goal"],
+                    episode_over_before=False,
+                    episode_over_after=env.episode_over,
+                    agent_action=original_action,
+                    action_source=(
+                        "max_step_override" if max_step_override else
+                        "early_rotation_override" if early_rotation_override else
+                        action_trace["action_source"]
+                    ),
+                    overridden_action=original_action if early_rotation_override or max_step_override else None,
+                    override_reason=(
+                        "max_step" if max_step_override else
+                        "early_rotation" if early_rotation_override else None
+                    ),
+                    executed_action=action["action"],
+                    pending_before=action_trace["pending_before"],
+                    pending_after=action_trace["pending_after"],
+                    metadata=action_trace["metadata"],
+                    early_rotation_override=early_rotation_override,
+                    max_step_override=max_step_override,
+                )
             
         info = env.get_metrics()
         result_dict = dict()
@@ -140,10 +180,13 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
 
         with open(os.path.join(os.path.join(result_path, "log"),"stats_{}.json".format(env.current_episode.episode_id)), "w") as f:
             json.dump(result_dict, f, indent=4)
+        if trace_writer is not None:
+            trace_writer.close()
 
 class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance, 
-                    turn_angle, max_action_history, resolution_ratio, num_generations = 1, require_map=True):
+                    turn_angle, max_action_history, resolution_ratio, num_generations = 1,
+                    require_map=True, stop_trace_enabled=False):
         
         print("Initialize NaVIDA")
         
@@ -154,6 +197,7 @@ class NaVIDA_Agent(Agent):
         self.resolution_ratio = resolution_ratio
         self.max_action_history = max_action_history
         self.num_generations = num_generations
+        self.stop_trace_enabled = stop_trace_enabled
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "video"), exist_ok=True)
@@ -341,6 +385,10 @@ class NaVIDA_Agent(Agent):
         self.topdown_map_list = []
         self.pending_action_list = []
         self.rgb_list = []
+        if self.stop_trace_enabled:
+            self.trace_metadata_queue = []
+            self.last_action_trace_metadata = None
+            self.decision_step = 0
 
         self.conversations = []
         self.conversations.append({
@@ -366,7 +414,18 @@ class NaVIDA_Agent(Agent):
             output_im = np.concatenate((rgb, top_down_map), axis=1)
 
         if len(self.pending_action_list) != 0 :
+            pending_before = len(self.pending_action_list)
             temp_action = self.pending_action_list.pop(0)
+            if self.stop_trace_enabled:
+                metadata = self.trace_metadata_queue.pop(0)
+                metadata = {**metadata, "agent_action_source": "pending"}
+                self.last_action_trace_metadata = {
+                    "agent_action": temp_action,
+                    "action_source": "pending",
+                    "pending_before": pending_before,
+                    "pending_after": len(self.pending_action_list),
+                    "metadata": metadata,
+                }
             
             if self.require_map:
                 img = self.addtext(output_im, observations["instruction"]["text"], "Pending action: {}".format(temp_action))
@@ -394,6 +453,7 @@ class NaVIDA_Agent(Agent):
             })
 
         navigation = self.predict_inference()
+        raw_navigation = navigation
         
         if self.require_map:
             img = self.addtext(output_im, observations["instruction"]["text"], navigation)
@@ -404,7 +464,7 @@ class NaVIDA_Agent(Agent):
         select_action_idx = 3
 
         result = result[:select_action_idx]
-        
+        selected_actions = []
         for idx, (action_index,numeric) in enumerate(result):
             pending_action_list = []
             if action_index == 0:
@@ -428,8 +488,37 @@ class NaVIDA_Agent(Agent):
                 pending_action_list.append(action_index)
             
             self.pending_action_list.extend(pending_action_list)
+            selected_actions.extend(pending_action_list)
 
-        return {"action": self.pending_action_list.pop(0)}
+        pending_before = len(self.pending_action_list)
+        if self.stop_trace_enabled:
+            self.trace_metadata_queue.extend(chunk_metadata(
+                episode_id=str(self.episode_id),
+                decision_id=self.decision_step,
+                selected_chunk=selected_actions,
+                raw_model_outputs=[raw_navigation],
+                parsed_candidate_chunks=[selected_actions],
+                candidate_rewards=[],
+                selected_index=0,
+            ))
+            self.decision_step += 1
+        action = self.pending_action_list.pop(0)
+        if self.stop_trace_enabled:
+            metadata = self.trace_metadata_queue.pop(0)
+            metadata = {**metadata, "agent_action_source": "generated"}
+            self.last_action_trace_metadata = {
+                "agent_action": action,
+                "action_source": "generated",
+                "pending_before": pending_before,
+                "pending_after": len(self.pending_action_list),
+                "metadata": metadata,
+            }
+        return {"action": action}
+
+    def consume_action_trace_metadata(self):
+        metadata = self.last_action_trace_metadata
+        self.last_action_trace_metadata = None
+        return metadata
 
 
 def main():
@@ -449,6 +538,8 @@ def main():
     parser.add_argument("--num-generations",type=int,help="whether use video or multi image",default=1)
     parser.add_argument("--episode-ids-file",type=str,default=None,
                         help="JSON episode ID list to select, in the file's order")
+    parser.add_argument("--stop-trace",action="store_true",
+                        help="write default-off atomic action provenance JSONL")
     args = parser.parse_args()
 
     config = get_config(args.exp_config)
@@ -500,7 +591,7 @@ def main():
 
     evaluate_agent(config, args.split_id, dataset_split, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
-                args.resolution_ratio)
+                args.resolution_ratio, args.stop_trace)
 
 if __name__ == "__main__":
     main()
