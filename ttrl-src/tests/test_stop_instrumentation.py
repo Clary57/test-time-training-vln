@@ -1,5 +1,6 @@
 import importlib.util
 import importlib.machinery
+import ast
 import json
 import random
 import tempfile
@@ -192,6 +193,54 @@ class StopInstrumentationTests(unittest.TestCase):
         )
         self.assertIsNotNone(trace_spec)
         self.assertEqual(Path(trace_spec.origin).resolve(), (eval_dir/"stop_trace.py").resolve())
+
+    def test_evaluator_project_root_precedence_when_absent_or_late(self):
+        root=Path(__file__).parents[1]
+        eval_dir=root/"eval"
+        sources={name:(eval_dir/name).read_text() for name in ("eval.py","eval_ttt.py")}
+        blocks={}
+        for name,source in sources.items():
+            tree=ast.parse(source)
+            trace_import=next(
+                index for index,node in enumerate(tree.body)
+                if isinstance(node,ast.ImportFrom) and node.module=="eval.stop_trace"
+            )
+            project_assignment=next(
+                index for index,node in enumerate(tree.body[:trace_import])
+                if isinstance(node,ast.Assign)
+                and any(isinstance(target,ast.Name) and target.id=="PROJECT_ROOT" for target in node.targets)
+            )
+            path_insert=next(
+                index for index,node in enumerate(
+                    tree.body[project_assignment:trace_import],
+                    start=project_assignment,
+                )
+                if isinstance(node,ast.Expr)
+                and ast.get_source_segment(source,node).strip()
+                =="sys.path.insert(0, PROJECT_ROOT)"
+            )
+            self.assertLess(path_insert,trace_import)
+            block=tree.body[project_assignment:path_insert+1]
+            blocks[name]=[ast.dump(node,include_attributes=False) for node in block]
+            code=compile(ast.Module(body=block,type_ignores=[]),name,"exec")
+            for initial in (
+                [str(eval_dir),"sentinel"],
+                [str(eval_dir),str(root),"sentinel"],
+            ):
+                fake_sys=type("FakeSys",(),{"path":list(initial)})()
+                namespace={"os":__import__("os"),"sys":fake_sys,"__file__":str(eval_dir/name)}
+                exec(code,namespace)
+                self.assertEqual(fake_sys.path[0],str(root))
+                self.assertEqual(fake_sys.path.count(str(root)),1)
+                package_spec=importlib.machinery.PathFinder.find_spec("eval",fake_sys.path)
+                self.assertIsNotNone(package_spec)
+                self.assertEqual(Path(package_spec.origin).resolve(),(eval_dir/"__init__.py").resolve())
+                trace_spec=importlib.machinery.PathFinder.find_spec(
+                    "eval.stop_trace",package_spec.submodule_search_locations
+                )
+                self.assertIsNotNone(trace_spec)
+                self.assertEqual(Path(trace_spec.origin).resolve(),(eval_dir/"stop_trace.py").resolve())
+        self.assertEqual(blocks["eval.py"],blocks["eval_ttt.py"])
 
     def test_updater_exposes_existing_choice_without_second_ranking(self):
         source=(Path(__file__).parents[1]/"trainer"/"trajectory_consensus_updater.py").read_text()
