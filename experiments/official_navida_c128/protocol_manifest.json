@@ -23,6 +23,7 @@
   "lora_path": null,
   "adaptation": false,
   "worker_count": 8,
-  "physical_gpu_count": 4,
-  "workers_per_gpu": 2
+  "physical_gpu_count": 1,
+  "workers_per_gpu": 1,
+  "scheduling": "eight fresh evaluator processes executed serially in split-id order"
 }

@@ -36,18 +36,20 @@ def main():
     launch_text = launch.read_text()
     for required in (
         "SPLIT_NUM=8", "--max-action-history 200", "--num-generations 1",
-        "--episode-ids-file", "GPU $gpu has compute processes",
-        "GPU $gpu has only ${free_mib} MiB free",
+        "--episode-ids-file", "GPU $GPU has compute processes",
+        "GPU $GPU has only ${free_mib} MiB free", "assert_gpu_idle",
     ):
         assert required in launch_text
     assert "--lora-path" not in launch_text
+    assert "worker_pids" not in launch_text
+    assert ") &" not in launch_text
     print(json.dumps({
         "status": "PASS",
         "selection_sha256": sha256(selection_path),
         "episode_count": len(ids),
         "worker_count": 8,
-        "physical_gpu_count": 4,
-        "workers_per_gpu": 2,
+        "physical_gpu_count": 1,
+        "workers_per_gpu": 1,
     }, indent=2))
 
 

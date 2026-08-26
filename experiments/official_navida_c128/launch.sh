@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-  echo "usage: $0 RESULT_ROOT GPU0 GPU1 GPU2 GPU3" >&2
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 RESULT_ROOT GPU_ID" >&2
   exit 2
 fi
 
 RESULT_ROOT=$1
-shift
-GPUS=("$@")
+GPU=$2
 
 PROJECT=/hdd3/wangziyu/code/test-time-training-vln
 NAVIDA_ROOT=/hdd3/wangziyu/code/Self-TTRL4VLN/NaVIDA
@@ -28,17 +27,14 @@ SPLIT_NUM=8
 [[ $(sha256sum "$CONFIG" | awk '{print $1}') == "$EXPECTED_CONFIG_SHA" ]] || {
   echo "config hash mismatch" >&2; exit 1;
 }
-[[ ${#GPUS[@]} -eq 4 ]] || { echo "exactly four physical GPUs are required" >&2; exit 1; }
-[[ $(printf '%s\n' "${GPUS[@]}" | sort -u | wc -l) -eq 4 ]] || {
-  echo "physical GPU IDs must be distinct" >&2; exit 1;
+assert_gpu_idle() {
+  local compute_count free_mib
+  compute_count=$(nvidia-smi -i "$GPU" --query-compute-apps=pid --format=csv,noheader,nounits | sed '/^[[:space:]]*$/d' | wc -l)
+  free_mib=$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')
+  [[ $compute_count -eq 0 ]] || { echo "GPU $GPU has compute processes" >&2; return 1; }
+  [[ $free_mib -ge 45000 ]] || { echo "GPU $GPU has only ${free_mib} MiB free" >&2; return 1; }
 }
-
-for gpu in "${GPUS[@]}"; do
-  compute_count=$(nvidia-smi -i "$gpu" --query-compute-apps=pid --format=csv,noheader,nounits | sed '/^[[:space:]]*$/d' | wc -l)
-  free_mib=$(nvidia-smi -i "$gpu" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')
-  [[ $compute_count -eq 0 ]] || { echo "GPU $gpu has compute processes" >&2; exit 1; }
-  [[ $free_mib -ge 45000 ]] || { echo "GPU $gpu has only ${free_mib} MiB free" >&2; exit 1; }
-done
+assert_gpu_idle
 
 mkdir -p "$RESULT_ROOT"
 cp "$SELECTION" "$RESULT_ROOT/selection128.json"
@@ -47,13 +43,12 @@ cp "$PROJECT/experiments/official_navida_c128/protocol_manifest.json" "$RESULT_R
 git -C "$PROJECT" status --short --branch > "$RESULT_ROOT/git_status_at_launch.txt"
 git -C "$PROJECT" rev-parse HEAD > "$RESULT_ROOT/git_head_at_launch.txt"
 
-worker_pids=()
 for split_id in $(seq 0 $((SPLIT_NUM - 1))); do
-  gpu=${GPUS[$((split_id / 2))]}
+  assert_gpu_idle
   worker_root=$RESULT_ROOT/worker_$split_id
   mkdir "$worker_root"
   command=(
-    env CUDA_VISIBLE_DEVICES="$gpu"
+    env CUDA_VISIBLE_DEVICES="$GPU"
     "$PYTHON" "$EVALUATOR"
     --exp-config "$CONFIG"
     --split-num "$SPLIT_NUM"
@@ -69,8 +64,8 @@ for split_id in $(seq 0 $((SPLIT_NUM - 1))); do
   )
   printf '%q ' "${command[@]}" > "$worker_root/command.txt"
   printf '\n' >> "$worker_root/command.txt"
-  printf '%s\n' "$gpu" > "$worker_root/physical_gpu.txt"
-  (
+  printf '%s\n' "$GPU" > "$worker_root/physical_gpu.txt"
+  if ! (
     cd "$NAVIDA_ROOT"
     export PYTHONDONTWRITEBYTECODE=1
     export PYTHONPATH="$NAVIDA_ROOT:$PROJECT/ttrl-src"
@@ -79,15 +74,9 @@ for split_id in $(seq 0 $((SPLIT_NUM - 1))); do
     rc=$?
     printf '%s\n' "$rc" > "$worker_root/eval_exit_code.txt"
     exit "$rc"
-  ) &
-  worker_pids+=("$!")
-done
-
-failed=0
-for pid in "${worker_pids[@]}"; do
-  if ! wait "$pid"; then
-    failed=1
+  ); then
+    touch "$RESULT_ROOT/FAILED"
+    exit 1
   fi
 done
-[[ $failed -eq 0 ]] || { touch "$RESULT_ROOT/FAILED"; exit 1; }
 touch "$RESULT_ROOT/SUCCESS"

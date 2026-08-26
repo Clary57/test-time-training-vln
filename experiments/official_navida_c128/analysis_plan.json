@@ -26,6 +26,6 @@
     "lora": null,
     "adaptation": false,
     "split_num": 8,
-    "worker_topology": "eight evaluator processes, two per physical GPU, matching official scripts/eval.sh"
+    "worker_topology": "eight evaluator shard processes run serially on one physical GPU; official process and seed boundaries are preserved while concurrency is removed"
   }
 }
