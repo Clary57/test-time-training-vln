@@ -389,7 +389,8 @@ class EvaluatorProtocolSourceTests(unittest.TestCase):
         self.assertIn("select_episodes_in_file_order", source)
         self.assertIn("shard_episodes", source)
         self.assertIn("dataset_split = dataset", source)
-        self.assertIn("select_action_idx = 3", source)
+        self.assertIn('parser.add_argument("--max-executed-chunks"', source)
+        self.assertIn("result[:self.max_executed_chunks]", source)
         self.assertNotIn("from vllm", source)
         self.assertIn("def encode_image_base64(image):", source)
 

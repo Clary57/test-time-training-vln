@@ -73,8 +73,29 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+def normalize_max_executed_chunks(value):
+    value = int(value)
+    if value not in (2, 3):
+        raise ValueError("max_executed_chunks must be 2 or 3")
+    return value
+
+
+def record_run_metadata(result_path, max_executed_chunks):
+    metadata_path = os.path.join(result_path, "run_metadata.json")
+    metadata = {}
+    if os.path.exists(metadata_path):
+        with open(metadata_path) as handle:
+            metadata = json.load(handle)
+    metadata["max_executed_chunks"] = max_executed_chunks
+    os.makedirs(result_path, exist_ok=True)
+    with open(metadata_path, "w") as handle:
+        json.dump(metadata, handle, indent=2)
+        handle.write("\n")
+
+
 def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
-                           episode_ids_file_sha256, selection_seed, dataset_split):
+                           episode_ids_file_sha256, selection_seed, dataset_split,
+                           max_executed_chunks=3):
     os.makedirs(result_path, exist_ok=True)
     with open(os.path.join(result_path, "episode_manifest.json"), "w") as handle:
         json.dump({
@@ -86,12 +107,13 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
             "episode_ids_file_sha256": episode_ids_file_sha256,
             "selection_seed": selection_seed,
             "dataset_split": dataset_split,
+            "max_executed_chunks": max_executed_chunks,
         }, handle, indent=2)
 
 
 def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path, num_generations,
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
-                    stop_trace=False) -> None:
+                    max_executed_chunks=3, stop_trace=False) -> None:
  
     env = Env(config.habitat, dataset)
 
@@ -103,6 +125,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         max_action_history, 
                         resolution_ratio, 
                         num_generations,
+                        max_executed_chunks=max_executed_chunks,
                         stop_trace_enabled=stop_trace)
 
     num_episodes = len(env.episodes)
@@ -193,7 +216,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
 class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance, 
                     turn_angle, max_action_history, resolution_ratio, num_generations = 1,
-                    require_map=True, stop_trace_enabled=False):
+                    require_map=True, max_executed_chunks=3, stop_trace_enabled=False):
         
         print("Initialize NaVIDA")
         
@@ -204,6 +227,7 @@ class NaVIDA_Agent(Agent):
         self.resolution_ratio = resolution_ratio
         self.max_action_history = max_action_history
         self.num_generations = num_generations
+        self.max_executed_chunks = normalize_max_executed_chunks(max_executed_chunks)
         self.stop_trace_enabled = stop_trace_enabled
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
@@ -468,11 +492,39 @@ class NaVIDA_Agent(Agent):
         
         result = self.extract_multi_result(navigation)
 
-        select_action_idx = 3
+        selected_actions = self._queue_action_chunks(result, navigation)
 
-        result = result[:select_action_idx]
+        pending_before = len(self.pending_action_list)
+        if self.stop_trace_enabled:
+            metadata_rows = chunk_metadata(
+                episode_id=str(self.episode_id),
+                decision_id=self.decision_step,
+                selected_chunk=selected_actions,
+                raw_model_outputs=[raw_navigation],
+                parsed_candidate_chunks=[selected_actions],
+                candidate_rewards=[],
+                selected_index=0,
+            )
+            for metadata in metadata_rows:
+                metadata["max_executed_chunks"] = self.max_executed_chunks
+            self.trace_metadata_queue.extend(metadata_rows)
+            self.decision_step += 1
+        action = self.pending_action_list.pop(0)
+        if self.stop_trace_enabled:
+            metadata = self.trace_metadata_queue.pop(0)
+            metadata = {**metadata, "agent_action_source": "generated"}
+            self.last_action_trace_metadata = {
+                "agent_action": action,
+                "action_source": "generated",
+                "pending_before": pending_before,
+                "pending_after": len(self.pending_action_list),
+                "metadata": metadata,
+            }
+        return {"action": action}
+
+    def _queue_action_chunks(self, result, navigation):
         selected_actions = []
-        for idx, (action_index,numeric) in enumerate(result):
+        for idx, (action_index,numeric) in enumerate(result[:self.max_executed_chunks]):
             pending_action_list = []
             if action_index == 0:
                 pending_action_list.append(0)
@@ -487,40 +539,16 @@ class NaVIDA_Agent(Agent):
             elif action_index == 3:
                 for _ in range(min(3,round(numeric/self.turn_angle))):
                     pending_action_list.append(3)
-            
+
             if action_index is None or len(pending_action_list)==0:
                 print('random select an action')
                 action_index = random.randint(1, 3)
                 navigation = self.action_id_to_str(action_index)
                 pending_action_list.append(action_index)
-            
+
             self.pending_action_list.extend(pending_action_list)
             selected_actions.extend(pending_action_list)
-
-        pending_before = len(self.pending_action_list)
-        if self.stop_trace_enabled:
-            self.trace_metadata_queue.extend(chunk_metadata(
-                episode_id=str(self.episode_id),
-                decision_id=self.decision_step,
-                selected_chunk=selected_actions,
-                raw_model_outputs=[raw_navigation],
-                parsed_candidate_chunks=[selected_actions],
-                candidate_rewards=[],
-                selected_index=0,
-            ))
-            self.decision_step += 1
-        action = self.pending_action_list.pop(0)
-        if self.stop_trace_enabled:
-            metadata = self.trace_metadata_queue.pop(0)
-            metadata = {**metadata, "agent_action_source": "generated"}
-            self.last_action_trace_metadata = {
-                "agent_action": action,
-                "action_source": "generated",
-                "pending_before": pending_before,
-                "pending_after": len(self.pending_action_list),
-                "metadata": metadata,
-            }
-        return {"action": action}
+        return selected_actions
 
     def consume_action_trace_metadata(self):
         metadata = self.last_action_trace_metadata
@@ -543,11 +571,15 @@ def main():
     parser.add_argument("--turn-angle",type=int,help="angle that one turn action takes",default=15)
     parser.add_argument("--max-action-history",type=int,help="the maximum num of action history",default=10)
     parser.add_argument("--num-generations",type=int,help="whether use video or multi image",default=1)
+    parser.add_argument("--max-executed-chunks",type=int,choices=(2, 3),default=3,
+                        help="number of parsed action chunks to execute")
     parser.add_argument("--episode-ids-file",type=str,default=None,
                         help="JSON episode ID list to select, in the file's order")
     parser.add_argument("--stop-trace",action="store_true",
                         help="write default-off atomic action provenance JSONL")
     args = parser.parse_args()
+    args.max_executed_chunks = normalize_max_executed_chunks(args.max_executed_chunks)
+    record_run_metadata(args.result_path, args.max_executed_chunks)
 
     config = get_config(args.exp_config)
     with habitat.config.read_write(config):
@@ -590,7 +622,8 @@ def main():
             raise ValueError(f"selected episode shard {args.split_id} is unexpectedly empty")
         write_episode_manifest(
             args.result_path, args.split_num, args.split_id, dataset.episodes, requested_ids,
-            selection_sha256, selection_metadata.get("seed"), config.habitat.dataset.split
+            selection_sha256, selection_metadata.get("seed"), config.habitat.dataset.split,
+            args.max_executed_chunks
         )
         dataset_split = dataset
     else:
@@ -598,7 +631,7 @@ def main():
 
     evaluate_agent(config, args.split_id, dataset_split, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
-                args.resolution_ratio, args.stop_trace)
+                args.resolution_ratio, args.max_executed_chunks, args.stop_trace)
 
 if __name__ == "__main__":
     main()
