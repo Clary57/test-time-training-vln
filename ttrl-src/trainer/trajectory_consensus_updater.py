@@ -34,6 +34,8 @@ class TrajectoryConsensusUpdater:
         num_generations: int,
         temperature: float,
         seed: int,
+        disable_update: bool = False,
+        trace_metadata_enabled: bool = False,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -46,6 +48,8 @@ class TrajectoryConsensusUpdater:
         self.max_grad_norm = max_grad_norm
         self.num_generations = num_generations
         self.seed = seed
+        self.disable_update = disable_update
+        self.trace_metadata_enabled = trace_metadata_enabled
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -108,6 +112,17 @@ class TrajectoryConsensusUpdater:
             )
             return float(squared_norm.sqrt().item())
 
+    def adapter_checksum(self) -> str:
+        """Return a deterministic byte-level checksum of all trainable adapters."""
+        digest = hashlib.sha256()
+        for name, parameter in self.trainable_parameters:
+            tensor = parameter.detach().contiguous()
+            digest.update(name.encode("utf-8"))
+            digest.update(str(tensor.dtype).encode("ascii"))
+            digest.update(str(tuple(tensor.shape)).encode("ascii"))
+            digest.update(tensor.reshape(-1).view(torch.uint8).cpu().numpy().tobytes())
+        return digest.hexdigest()
+
     def _completion_mask(self, completion_ids: torch.Tensor) -> torch.Tensor:
         eos_token_id = self.processor.tokenizer.eos_token_id
         is_eos = completion_ids == eos_token_id
@@ -157,6 +172,14 @@ class TrajectoryConsensusUpdater:
             raise ValueError("Online TTRL evaluates exactly one episode/prompt at a time")
         timing: Dict[str, float] = {}
         before_norm = self.adapter_norm()
+        before_checksum = self.adapter_checksum() if self.disable_update else None
+        before_parameters = (
+            # Keep the verification snapshot off-device. Production runs are
+            # close to GPU capacity, so validation must not duplicate LoRA
+            # tensors in GPU memory.
+            [parameter.detach().cpu().clone() for _, parameter in self.trainable_parameters]
+            if self.disable_update else None
+        )
 
         generation_start = time.perf_counter()
         self.model.eval()
@@ -178,7 +201,8 @@ class TrajectoryConsensusUpdater:
         completions = self.processor.batch_decode(completion_ids, skip_special_tokens=True)
         actions, rewards_list, valid_list = self._actions_and_rewards(completions)
         valid_count = int(sum(valid_list))
-        selected_actions = self._select_actions(actions, rewards_list, valid_list)
+        selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
+        selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
 
         loss_forward_start = time.perf_counter()
         self.model.train()
@@ -219,11 +243,21 @@ class TrajectoryConsensusUpdater:
             torch.nn.utils.clip_grad_norm_(
                 [parameter for _, parameter in self.trainable_parameters], self.max_grad_norm
             )
-        self.optimizer.step()
+        if not self.disable_update:
+            self.optimizer.step()
         timing["optimizer"] = time.perf_counter() - optimizer_start
         after_norm = self.adapter_norm()
+        after_checksum = self.adapter_checksum() if self.disable_update else None
+        parameters_unchanged = None
+        if self.disable_update:
+            parameters_unchanged = all(
+                torch.equal(parameter.detach().cpu(), before)
+                for (_, parameter), before in zip(self.trainable_parameters, before_parameters)
+            )
+            if not parameters_unchanged or before_checksum != after_checksum or before_norm != after_norm:
+                raise RuntimeError("LoRA parameters changed while optimizer updates were disabled")
 
-        return {
+        result = {
             "selected_actions": selected_actions,
             "loss": float(loss.detach().item()),
             "rewards": [float(reward) for reward in rewards_list],
@@ -232,8 +266,18 @@ class TrajectoryConsensusUpdater:
             "timing": timing,
             "adapter_norm_before": before_norm,
             "adapter_norm_after": after_norm,
+            "adapter_checksum_before": before_checksum,
+            "adapter_checksum_after": after_checksum,
+            "parameters_unchanged": parameters_unchanged,
+            "update_enabled": not self.disable_update,
             "completions": completions,
         }
+        if self.trace_metadata_enabled:
+            result.update({
+                "candidate_actions": [list(action) for action in actions],
+                "selected_candidate_index": selected_candidate_index,
+            })
+        return result
 
     def _actions_and_rewards(self, completions: Sequence[str]) -> Tuple[List[List[int]], List[float], List[bool]]:
         actions: List[List[int]] = []
@@ -246,12 +290,27 @@ class TrajectoryConsensusUpdater:
         return actions, rewards, valid
 
     def _select_actions(self, actions: Sequence[List[int]], rewards: Sequence[float], valid: Sequence[bool]) -> List[int]:
-        valid_indices = [index for index, is_valid in enumerate(valid) if is_valid]
-        if not valid_indices:
+        selected_index = self._selected_candidate_index(rewards, valid)
+        return self._actions_for_selected_index(actions, selected_index)
+
+    @staticmethod
+    def _actions_for_selected_index(
+        actions: Sequence[List[int]], selected_index: int | None
+    ) -> List[int]:
+        if selected_index is None:
             # Invalid generations must never receive a gradient.  A deterministic
             # fallback still lets the environment make progress.
             return [random.randint(1, 3)]
-        return list(actions[min(valid_indices, key=lambda index: (-rewards[index], index))])
+        return list(actions[selected_index])
+
+    @staticmethod
+    def _selected_candidate_index(
+        rewards: Sequence[float], valid: Sequence[bool]
+    ) -> int | None:
+        valid_indices = [index for index, is_valid in enumerate(valid) if is_valid]
+        if not valid_indices:
+            return None
+        return min(valid_indices, key=lambda index: (-rewards[index], index))
 
     def _parse_action_chunk(self, completion: str) -> Tuple[List[int], bool]:
         actions: List[int] = []

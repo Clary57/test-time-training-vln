@@ -57,10 +57,19 @@ def _finite_metric(value: object, metric: str, stats_path: Path) -> float:
     return value
 
 
-def aggregate_result_dirs(result_dirs: Sequence[Path]) -> Dict[str, object]:
+def aggregate_result_dirs(
+    result_dirs: Sequence[Path], expected_episode_ids: Sequence[str] | None = None
+) -> Dict[str, object]:
     """Load, validate, and aggregate disjoint evaluator result directories."""
     if not result_dirs:
         raise ValueError("At least one result directory is required")
+
+    explicit_expected_ids = None
+    if expected_episode_ids is not None:
+        normalized_expected = [str(episode_id) for episode_id in expected_episode_ids]
+        if not normalized_expected or len(normalized_expected) != len(set(normalized_expected)):
+            raise ValueError("Explicit expected episode IDs must be non-empty and unique")
+        explicit_expected_ids = set(normalized_expected)
 
     assigned_ids: Set[str] = set()
     shared_expected_ids: Set[str] | None = None
@@ -75,7 +84,10 @@ def aggregate_result_dirs(result_dirs: Sequence[Path]) -> Dict[str, object]:
             raise ValueError(f"Episode IDs assigned to multiple manifests: {sorted(overlap)}")
         assigned_ids.update(manifest_ids)
         manifest_expected = manifest["expected_episode_ids"]
-        if manifest_expected is not None:
+        if explicit_expected_ids is not None:
+            if not set(manifest_ids).issubset(explicit_expected_ids):
+                raise ValueError(f"Shard assignment is outside explicit expected IDs: {result_dir}")
+        elif manifest_expected is not None:
             manifest_expected_set = set(manifest_expected)
             if shared_expected_ids is None:
                 shared_expected_ids = manifest_expected_set
@@ -99,7 +111,11 @@ def aggregate_result_dirs(result_dirs: Sequence[Path]) -> Dict[str, object]:
             stats_by_id[episode_id] = stats
             source_by_id[episode_id] = stats_path
 
-    expected_ids = shared_expected_ids if shared_expected_ids is not None else assigned_ids
+    expected_ids = (
+        explicit_expected_ids
+        if explicit_expected_ids is not None
+        else shared_expected_ids if shared_expected_ids is not None else assigned_ids
+    )
     actual_ids = set(stats_by_id)
     missing = sorted(expected_ids - actual_ids)
     unexpected = sorted(actual_ids - expected_ids)
@@ -143,9 +159,21 @@ def main() -> None:
         help="per-split result directories, each containing a manifest and log directory",
     )
     parser.add_argument("--output", type=Path, help="optional JSON path for the merged summary")
+    parser.add_argument(
+        "--expected-episode-ids-file",
+        type=Path,
+        help="JSON list, or object with episode_ids, defining strict global coverage",
+    )
     args = parser.parse_args()
 
-    summary = aggregate_result_dirs(args.result_dirs)
+    expected_episode_ids = None
+    if args.expected_episode_ids_file:
+        with args.expected_episode_ids_file.open() as handle:
+            payload = json.load(handle)
+        expected_episode_ids = payload.get("episode_ids") if isinstance(payload, Mapping) else payload
+        if not isinstance(expected_episode_ids, list):
+            raise ValueError("expected-episode-ids-file must contain a list or episode_ids list")
+    summary = aggregate_result_dirs(args.result_dirs, expected_episode_ids)
     rendered = json.dumps(summary, indent=2, sort_keys=True)
     print(rendered)
     if args.output:
