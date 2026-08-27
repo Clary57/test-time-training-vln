@@ -59,9 +59,9 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
         self.assertEqual(images, [["image"]])
         self.assertEqual(prompt_inputs.device, "cpu")
 
-    def test_official_protocol_matches_public_double_image_input_construction(self):
+    def test_official_protocol_matches_public_single_image_input_construction(self):
         images, prompt_inputs = self._build_prompt_inputs(True)
-        self.assertEqual(images, [["image"], ["image"]])
+        self.assertEqual(images, [["image"]])
         self.assertEqual(prompt_inputs.device, "cpu")
 
     def test_official_protocol_is_explicit_and_requires_history_200(self):

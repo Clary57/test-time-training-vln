@@ -365,10 +365,6 @@ class NaVIDA_Agent(Agent):
         image_inputs = []
         imgs, vids = process_vision_info(self.conversations)
         image_inputs.append(imgs)
-        if self.official_navida_protocol:
-            # Match the public NaVIDA evaluator's exact Transformers input
-            # construction.  The legacy TTRL path remains unchanged by default.
-            image_inputs.append(imgs)
 
         prompt_inputs = self.processor(
             text=texts,
