@@ -2,6 +2,10 @@ import ast
 import unittest
 from pathlib import Path
 
+import torch
+from peft import LoraConfig
+from transformers import Qwen2_5_VLConfig, Qwen2_5_VLForConditionalGeneration
+
 
 EVALUATOR = Path(__file__).resolve().parents[1] / "eval" / "eval_ttt.py"
 
@@ -79,6 +83,54 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
         updater_source = updater.read_text()
         self.assertIn('completion.split(",") if chunk.strip()][:2]', updater_source)
         self.assertIn("sequential_generation=official_navida_protocol", self.source)
+
+    def test_native_adapter_keeps_qwen_type_and_is_initially_output_neutral(self):
+        config = Qwen2_5_VLConfig(
+            vocab_size=64,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            num_key_value_heads=2,
+            max_position_embeddings=64,
+            image_token_id=60,
+            video_token_id=61,
+            vision_start_token_id=62,
+            vision_end_token_id=63,
+            rope_scaling={"mrope_section": [1, 1, 2], "rope_type": "default", "type": "default"},
+            vision_config={
+                "depth": 1, "hidden_size": 16, "intermediate_size": 32,
+                "num_heads": 2, "out_hidden_size": 16,
+                "fullatt_block_indexes": [0], "patch_size": 2,
+                "spatial_merge_size": 1, "temporal_patch_size": 1,
+                "in_channels": 3, "window_size": 8,
+            },
+        )
+        model = Qwen2_5_VLForConditionalGeneration(config).eval()
+        original_type = type(model)
+        inputs = {
+            "input_ids": torch.tensor([[1, 2]], dtype=torch.long),
+            "attention_mask": torch.ones((1, 2), dtype=torch.long),
+        }
+        with torch.no_grad():
+            before = model(**inputs).logits.clone()
+        model.add_adapter(LoraConfig(
+            r=2,
+            lora_alpha=2,
+            target_modules=[
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj",
+            ],
+            exclude_modules=".*visual.*",
+        ))
+        with torch.no_grad():
+            after = model(**inputs).logits
+        trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
+        self.assertIs(type(model), original_type)
+        self.assertTrue(trainable)
+        self.assertTrue(all("lora_" in name for name in trainable))
+        self.assertFalse(any("visual" in name for name in trainable))
+        self.assertTrue(torch.equal(before, after))
 
 
 if __name__ == "__main__":

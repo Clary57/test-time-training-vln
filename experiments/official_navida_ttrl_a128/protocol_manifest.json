@@ -9,6 +9,7 @@
   "max_executed_chunks": 2,
   "num_generations": 3,
   "candidate_generation": "three sequential samples from identical official visual inputs",
+  "lora_injection": "native Transformers adapter; Qwen model type remains unchanged",
   "temperature": 0.3,
   "learning_rate": 0.000002,
   "weight_decay": 0.0,

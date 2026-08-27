@@ -7,6 +7,8 @@ The three candidates are sampled sequentially from the identical official visual
 input because Transformers cannot expand that nested visual structure with
 `num_return_sequences=3`; reward, medoid, teacher-forcing loss, and update semantics
 remain unchanged.
+LoRA is injected with the native Transformers adapter API so the outer Qwen model
+type and its official multimodal generation path remain unchanged.
 
 The caller supplies a comma-separated list of idle physical GPU IDs. Shards run in
 deterministic waves with at most one evaluator per GPU. Use a result root and GPU list

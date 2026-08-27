@@ -38,6 +38,39 @@ from eval.stop_trace import StopTraceWriter, chunk_metadata, resolve_success_dis
 SYSTEM_PROMPT = "You are a helpful assistant."
 
 
+def navida_lora_config():
+    return LoraConfig(
+        r=8,
+        lora_alpha=8,
+        lora_dropout=0.05,
+        bias="none",
+        target_modules=[
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ],
+        exclude_modules=".*visual.*",
+    )
+
+
+def attach_trainable_lora(model, lora_path, *, native_adapter):
+    """Attach LoRA without changing the Qwen model type in official mode."""
+    if native_adapter:
+        original_type = type(model)
+        if lora_path:
+            model.load_adapter(lora_path, is_trainable=True)
+        else:
+            model.add_adapter(navida_lora_config())
+        if type(model) is not original_type:
+            raise RuntimeError("native LoRA injection unexpectedly changed the model type")
+        trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
+        if not trainable or any("lora_" not in name for name in trainable):
+            raise RuntimeError("native LoRA injection exposed non-LoRA trainable parameters")
+        return model
+    if lora_path:
+        return PeftModel.from_pretrained(model, lora_path, is_trainable=True)
+    return get_peft_model(model, navida_lora_config())
+
+
 def encode_image_base64(image):
     """Encode a PIL image for Qwen's image_url conversation format.
 
@@ -261,25 +294,15 @@ class NaVIDA_Agent(Agent):
 
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_path, **model_init_kwargs)
 
-        if lora_path is not None and lora_path != '':
+        if lora_path:
             print('Loading trainable LoRA weights...')
-            self.model = PeftModel.from_pretrained(self.model, lora_path, is_trainable=True)
         else:
             print('Creating a new trainable LoRA adapter...')
-            self.model = get_peft_model(
-                self.model,
-                LoraConfig(
-                    r=8,
-                    lora_alpha=8,
-                    lora_dropout=0.05,
-                    bias="none",
-                    target_modules=[
-                        "q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj",
-                    ],
-                    exclude_modules=".*visual.*",
-                ),
-            )
+        self.model = attach_trainable_lora(
+            self.model,
+            lora_path,
+            native_adapter=official_navida_protocol,
+        )
 
         self.device = 'cuda'
         self.model.to(self.device)
@@ -694,6 +717,10 @@ def main():
         {
             "official_navida_protocol": args.official_navida_protocol,
             "sequential_candidate_generation": args.official_navida_protocol,
+            "lora_injection": (
+                "native_transformers_adapter"
+                if args.official_navida_protocol else "peft_model_wrapper"
+            ),
             "max_action_history": args.max_action_history,
             "max_executed_chunks": 2,
             "num_generations": args.num_generations,
