@@ -68,6 +68,7 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
     def test_manifest_records_protocol_critical_parameters(self):
         for field in (
             "official_navida_protocol", "max_action_history", "max_executed_chunks",
+            "sequential_candidate_generation",
             "num_generations", "temperature", "learning_rate", "weight_decay",
             "max_grad_norm", "disable_update", "stop_trace",
         ):
@@ -77,6 +78,7 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
         updater = EVALUATOR.parents[1] / "trainer" / "trajectory_consensus_updater.py"
         updater_source = updater.read_text()
         self.assertIn('completion.split(",") if chunk.strip()][:2]', updater_source)
+        self.assertIn("sequential_generation=official_navida_protocol", self.source)
 
 
 if __name__ == "__main__":

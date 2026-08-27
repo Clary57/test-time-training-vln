@@ -297,6 +297,7 @@ class NaVIDA_Agent(Agent):
             seed=seed,
             disable_update=disable_update,
             trace_metadata_enabled=stop_trace_enabled,
+            sequential_generation=official_navida_protocol,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -692,6 +693,7 @@ def main():
         episode_ids_file_sha256, selection_seed, config.habitat.dataset.split,
         {
             "official_navida_protocol": args.official_navida_protocol,
+            "sequential_candidate_generation": args.official_navida_protocol,
             "max_action_history": args.max_action_history,
             "max_executed_chunks": 2,
             "num_generations": args.num_generations,

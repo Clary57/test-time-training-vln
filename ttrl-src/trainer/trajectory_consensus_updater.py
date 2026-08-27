@@ -36,6 +36,7 @@ class TrajectoryConsensusUpdater:
         seed: int,
         disable_update: bool = False,
         trace_metadata_enabled: bool = False,
+        sequential_generation: bool = False,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -50,6 +51,7 @@ class TrajectoryConsensusUpdater:
         self.seed = seed
         self.disable_update = disable_update
         self.trace_metadata_enabled = trace_metadata_enabled
+        self.sequential_generation = sequential_generation
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -184,21 +186,39 @@ class TrajectoryConsensusUpdater:
         generation_start = time.perf_counter()
         self.model.eval()
         with torch.inference_mode():
-            generated_ids = self.model.generate(
-                **prompt_inputs,
-                generation_config=self.generation_config,
-                use_model_defaults=True,
-            )
+            if self.sequential_generation:
+                single_generation_config = GenerationConfig.from_dict(
+                    self.generation_config.to_dict()
+                )
+                single_generation_config.num_return_sequences = 1
+                generated_batches = [
+                    self.model.generate(
+                        **prompt_inputs,
+                        generation_config=single_generation_config,
+                        use_model_defaults=True,
+                    )
+                    for _ in range(self.num_generations)
+                ]
+            else:
+                generated_batches = [self.model.generate(
+                    **prompt_inputs,
+                    generation_config=self.generation_config,
+                    use_model_defaults=True,
+                )]
         # Tensors created in inference_mode cannot be saved by the subsequent
         # autograd graph.  Clone outside the context before teacher-forcing the
         # sampled tokens through the trainable LoRA model.
-        prompt_completion_ids = generated_ids.clone()
+        prompt_completion_batches = [batch.clone() for batch in generated_batches]
         timing["generation"] = time.perf_counter() - generation_start
 
         prompt_length = prompt_inputs["input_ids"].size(1)
-        completion_ids = prompt_completion_ids[:, prompt_length:]
-        completion_mask = self._completion_mask(completion_ids)
-        completions = self.processor.batch_decode(completion_ids, skip_special_tokens=True)
+        completion_id_batches = [batch[:, prompt_length:] for batch in prompt_completion_batches]
+        completion_masks = [self._completion_mask(batch) for batch in completion_id_batches]
+        completions = [
+            text
+            for batch in completion_id_batches
+            for text in self.processor.batch_decode(batch, skip_special_tokens=True)
+        ]
         actions, rewards_list, valid_list = self._actions_and_rewards(completions)
         valid_count = int(sum(valid_list))
         selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
@@ -206,20 +226,39 @@ class TrajectoryConsensusUpdater:
 
         loss_forward_start = time.perf_counter()
         self.model.train()
-        prompt_mask = prompt_inputs["attention_mask"].repeat_interleave(
-            self.num_generations, dim=0
-        )
-        attention_mask = torch.cat([prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1)
-        per_token_logps = self._per_token_logps(
-            self.model,
-            prompt_completion_ids,
-            attention_mask,
-            self._repeat_pixel_values(prompt_inputs["pixel_values"], self.num_generations),
-            prompt_inputs["image_grid_thw"].repeat_interleave(self.num_generations, dim=0),
-        )[:, prompt_length - 1 :]
+        if self.sequential_generation:
+            per_token_logps_batches = []
+            for prompt_completion_ids, completion_mask in zip(
+                prompt_completion_batches, completion_masks
+            ):
+                prompt_mask = prompt_inputs["attention_mask"]
+                attention_mask = torch.cat(
+                    [prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1
+                )
+                per_token_logps_batches.append(self._per_token_logps(
+                    self.model,
+                    prompt_completion_ids,
+                    attention_mask,
+                    prompt_inputs["pixel_values"],
+                    prompt_inputs["image_grid_thw"],
+                )[:, prompt_length - 1 :])
+        else:
+            completion_mask = completion_masks[0]
+            prompt_mask = prompt_inputs["attention_mask"].repeat_interleave(
+                self.num_generations, dim=0
+            )
+            attention_mask = torch.cat([prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1)
+            per_token_logps_batches = [self._per_token_logps(
+                self.model,
+                prompt_completion_batches[0],
+                attention_mask,
+                self._repeat_pixel_values(prompt_inputs["pixel_values"], self.num_generations),
+                prompt_inputs["image_grid_thw"].repeat_interleave(self.num_generations, dim=0),
+            )[:, prompt_length - 1 :]]
 
-        rewards = torch.tensor(rewards_list, dtype=per_token_logps.dtype, device=per_token_logps.device)
-        valid_mask = torch.tensor(valid_list, dtype=torch.bool, device=per_token_logps.device)
+        reference_logps = per_token_logps_batches[0]
+        rewards = torch.tensor(rewards_list, dtype=reference_logps.dtype, device=reference_logps.device)
+        valid_mask = torch.tensor(valid_list, dtype=torch.bool, device=reference_logps.device)
         advantages = torch.zeros_like(rewards)
         if valid_count:
             valid_rewards = rewards[valid_mask]
@@ -228,9 +267,32 @@ class TrajectoryConsensusUpdater:
             )
         # The detached copy makes this the usual score-function surrogate while
         # retaining a differentiable tensor for the all-equal-reward case.
-        per_token_loss = -torch.exp(per_token_logps - per_token_logps.detach()) * advantages.unsqueeze(1)
-        per_candidate_loss = (per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1).clamp_min(1)
-        loss = per_candidate_loss[valid_mask].mean() if valid_count else per_token_logps.sum() * 0.0
+        if self.sequential_generation:
+            per_candidate_loss = []
+            for index, (per_token_logps, completion_mask) in enumerate(
+                zip(per_token_logps_batches, completion_masks)
+            ):
+                per_token_loss = -torch.exp(
+                    per_token_logps - per_token_logps.detach()
+                ) * advantages[index]
+                per_candidate_loss.append(
+                    (per_token_loss * completion_mask).sum()
+                    / completion_mask.sum().clamp_min(1)
+                )
+            per_candidate_loss = torch.stack(per_candidate_loss)
+            zero_loss = sum(batch.sum() * 0.0 for batch in per_token_logps_batches)
+        else:
+            per_token_logps = per_token_logps_batches[0]
+            completion_mask = completion_masks[0]
+            per_token_loss = -torch.exp(
+                per_token_logps - per_token_logps.detach()
+            ) * advantages.unsqueeze(1)
+            per_candidate_loss = (
+                (per_token_loss * completion_mask).sum(dim=1)
+                / completion_mask.sum(dim=1).clamp_min(1)
+            )
+            zero_loss = per_token_logps.sum() * 0.0
+        loss = per_candidate_loss[valid_mask].mean() if valid_count else zero_loss
         timing["loss_forward"] = time.perf_counter() - loss_forward_start
 
         backward_start = time.perf_counter()

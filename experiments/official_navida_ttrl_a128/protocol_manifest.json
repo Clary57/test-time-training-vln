@@ -8,6 +8,7 @@
   "max_action_history": 200,
   "max_executed_chunks": 2,
   "num_generations": 3,
+  "candidate_generation": "three sequential samples from identical official visual inputs",
   "temperature": 0.3,
   "learning_rate": 0.000002,
   "weight_decay": 0.0,

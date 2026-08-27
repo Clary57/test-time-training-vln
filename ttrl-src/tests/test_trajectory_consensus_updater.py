@@ -55,11 +55,17 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             self.register_buffer("completion_tokens", torch.tensor(completion_tokens, dtype=torch.long))
             self.register_buffer("class_offsets", torch.linspace(-1.0, 1.0, 8))
             self.forward_use_cache = []
+            self.generate_calls = 0
 
         def generate(self, input_ids, **kwargs):
-            count = self.completion_tokens.numel()
+            count = kwargs["generation_config"].num_return_sequences
+            if count == 1:
+                tokens = self.completion_tokens[self.generate_calls:self.generate_calls + 1]
+            else:
+                tokens = self.completion_tokens
+            self.generate_calls += 1
             completion_ids = torch.stack(
-                [self.completion_tokens, torch.zeros(count, dtype=torch.long, device=input_ids.device)],
+                [tokens, torch.zeros(count, dtype=torch.long, device=input_ids.device)],
                 dim=1,
             )
             return torch.cat([input_ids.repeat(count, 1), completion_ids], dim=1)
@@ -81,7 +87,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         }
 
     def _updater(self, completion_tokens, completions, disable_update=False,
-                 trace_metadata_enabled=False):
+                 trace_metadata_enabled=False, sequential_generation=False):
         model = self.FakeModel(completion_tokens)
         updater = TrajectoryConsensusUpdater(
             model,
@@ -94,8 +100,31 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             seed=123,
             disable_update=disable_update,
             trace_metadata_enabled=trace_metadata_enabled,
+            sequential_generation=sequential_generation,
         )
         return model, updater
+
+    def test_sequential_generation_preserves_candidates_and_loss_update(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>turn left 15 degree</answer>",
+            },
+            trace_metadata_enabled=True,
+            sequential_generation=True,
+        )
+        updater.reset_episode("official-visual-input")
+        before = model.lora_adapter.detach().clone()
+
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(model.generate_calls, 3)
+        self.assertEqual(model.forward_use_cache, [False, False, False])
+        self.assertEqual(result["candidate_actions"], [[1], [1], [2]])
+        self.assertEqual(result["selected_actions"], [1])
+        self.assertEqual(len(result["rewards"]), 3)
+        self.assertFalse(torch.equal(model.lora_adapter.detach(), before))
 
     def test_adapt_step_updates_only_lora_and_reset_restores_base_and_optimizer(self):
         model, updater = self._updater(
