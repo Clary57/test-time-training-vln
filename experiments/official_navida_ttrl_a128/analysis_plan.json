@@ -1,0 +1,10 @@
+{
+  "analysis_type": "paired confirmatory-subset protocol comparison",
+  "primary_comparison": "official-protocol full TTRL A128 versus completed official frozen C0-128",
+  "episode_count": 128,
+  "primary_endpoint": "success",
+  "paired": true,
+  "bootstrap_seed": 42128,
+  "bootstrap_replicates": 20000,
+  "boundary": "This compares the complete three-candidate consensus plus online-update stack; it does not isolate optimizer updates without a matched disable-update arm."
+}

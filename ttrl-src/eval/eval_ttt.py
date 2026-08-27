@@ -84,7 +84,7 @@ def str2bool(v):
 
 def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
                            episode_ids_file_sha256=None, selection_seed=None,
-                           dataset_split=None):
+                           dataset_split=None, protocol_parameters=None):
     """Persist this shard and the common expected ID set before resume filtering."""
     os.makedirs(result_path, exist_ok=True)
     manifest = {
@@ -96,6 +96,7 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
         "episode_ids_file_sha256": episode_ids_file_sha256,
         "selection_seed": selection_seed,
         "dataset_split": dataset_split,
+        "protocol_parameters": protocol_parameters or {},
     }
     with open(os.path.join(result_path, "episode_manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -111,7 +112,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
                     max_episodes=None, early_stop_rotation=25, early_stop_steps=400,
-                    disable_update=False, stop_trace=False) -> None:
+                    disable_update=False, stop_trace=False,
+                    official_navida_protocol=False) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -138,7 +140,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         temperature,
                         seed,
                         disable_update=disable_update,
-                        stop_trace_enabled=stop_trace)
+                        stop_trace_enabled=stop_trace,
+                        official_navida_protocol=official_navida_protocol)
 
     num_episodes = len(env.episodes)
     
@@ -232,7 +235,8 @@ class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance,
                     turn_angle, max_action_history, resolution_ratio, num_generations,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
-                    require_map=True, disable_update=False, stop_trace_enabled=False):
+                    require_map=True, disable_update=False, stop_trace_enabled=False,
+                    official_navida_protocol=False):
         
         print("Initialize NaVIDA")
         
@@ -245,6 +249,7 @@ class NaVIDA_Agent(Agent):
         self.num_generations = num_generations
         self.seed = seed
         self.stop_trace_enabled = stop_trace_enabled
+        self.official_navida_protocol = official_navida_protocol
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "video"), exist_ok=True)
@@ -336,6 +341,10 @@ class NaVIDA_Agent(Agent):
         image_inputs = []
         imgs, vids = process_vision_info(self.conversations)
         image_inputs.append(imgs)
+        if self.official_navida_protocol:
+            # Match the public NaVIDA evaluator's exact Transformers input
+            # construction.  The legacy TTRL path remains unchanged by default.
+            image_inputs.append(imgs)
 
         prompt_inputs = self.processor(
             text=texts,
@@ -608,6 +617,8 @@ def main():
                         help="run full adaptation compute but skip optimizer.step")
     parser.add_argument("--stop-trace",action="store_true",
                         help="write default-off atomic action provenance JSONL")
+    parser.add_argument("--official-navida-protocol",action="store_true",
+                        help="match official NaVIDA prompt inputs; requires history 200")
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -622,6 +633,8 @@ def main():
         raise ValueError("episode-ids-file and max-episodes cannot be used together")
     if args.early_stop_rotation < 0 or args.early_stop_steps < 0:
         raise ValueError("early-stop limits must be non-negative")
+    if args.official_navida_protocol and args.max_action_history != 200:
+        raise ValueError("official-navida-protocol requires --max-action-history 200")
     seed_all(args.seed)
 
     config = get_config(args.exp_config)
@@ -676,14 +689,27 @@ def main():
         dataset.episodes = all_episodes[args.split_id::args.split_num][:args.max_episodes]
     write_episode_manifest(
         args.result_path, args.split_num, args.split_id, dataset.episodes, expected_episode_ids,
-        episode_ids_file_sha256, selection_seed, config.habitat.dataset.split
+        episode_ids_file_sha256, selection_seed, config.habitat.dataset.split,
+        {
+            "official_navida_protocol": args.official_navida_protocol,
+            "max_action_history": args.max_action_history,
+            "max_executed_chunks": 2,
+            "num_generations": args.num_generations,
+            "temperature": args.temperature,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "max_grad_norm": args.max_grad_norm,
+            "disable_update": args.disable_update,
+            "stop_trace": args.stop_trace,
+        },
     )
 
     evaluate_agent(config, args.split_id, dataset, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
                 args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
                 args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
-                args.early_stop_steps, args.disable_update, args.stop_trace)
+                args.early_stop_steps, args.disable_update, args.stop_trace,
+                args.official_navida_protocol)
 
 if __name__ == "__main__":
     main()

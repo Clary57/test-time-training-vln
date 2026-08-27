@@ -1,0 +1,19 @@
+{
+  "protocol": "official-navida-input-semantics-with-episode-local-ttrl",
+  "official_repository": "https://github.com/waynechu1021/NAVIDA.git",
+  "official_commit": "b86316a78a2865c80b445ed5a8fcc08fc0243dfb",
+  "evaluator": "ttrl-src/eval/eval_ttt.py",
+  "split_num": 8,
+  "official_navida_protocol": true,
+  "max_action_history": 200,
+  "max_executed_chunks": 2,
+  "num_generations": 3,
+  "temperature": 0.3,
+  "learning_rate": 0.000002,
+  "weight_decay": 0.0,
+  "max_grad_norm": 1.0,
+  "seed": 41,
+  "episode_local_reset": true,
+  "online_update": true,
+  "stop_trace": true
+}
