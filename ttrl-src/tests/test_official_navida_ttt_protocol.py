@@ -78,6 +78,8 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "update_policy", "min_reward_std", "min_reward_margin",
             "action_span_only", "max_updates_per_episode", "anchor_l2_weight",
             "max_adapter_delta_norm", "pairwise_beta",
+            "reward_geometry", "orientation_distance_scale",
+            "stop_distance_penalty", "candidate_sampling",
         ):
             self.assertIn(f'"{field}"', self.source)
 
@@ -90,6 +92,8 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "--min-reward-std", "--min-reward-margin", "--action-span-only",
             "--max-updates-per-episode", "--anchor-l2-weight",
             "--max-adapter-delta-norm", "--pairwise-beta",
+            "--reward-geometry", "--orientation-distance-scale",
+            "--stop-distance-penalty", "--candidate-sampling",
         ):
             self.assertIn(option, self.source)
 

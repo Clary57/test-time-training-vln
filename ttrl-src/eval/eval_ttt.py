@@ -5,6 +5,7 @@ from habitat import Env
 from habitat.core.agent import Agent
 from tqdm import trange
 import os, io
+import math
 import re
 import sys
 import torch
@@ -150,7 +151,10 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     min_reward_std=0.2, min_reward_margin=0.25,
                     action_span_only=False, max_updates_per_episode=0,
                     anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
-                    pairwise_beta=1.0) -> None:
+                    pairwise_beta=1.0, reward_geometry="xy",
+                    orientation_distance_scale=0.25 / math.radians(15.0),
+                    stop_distance_penalty=0.25,
+                    candidate_sampling="all_stochastic") -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -186,7 +190,11 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         max_updates_per_episode=max_updates_per_episode,
                         anchor_l2_weight=anchor_l2_weight,
                         max_adapter_delta_norm=max_adapter_delta_norm,
-                        pairwise_beta=pairwise_beta)
+                        pairwise_beta=pairwise_beta,
+                        reward_geometry=reward_geometry,
+                        orientation_distance_scale=orientation_distance_scale,
+                        stop_distance_penalty=stop_distance_penalty,
+                        candidate_sampling=candidate_sampling)
 
     num_episodes = len(env.episodes)
     
@@ -285,7 +293,10 @@ class NaVIDA_Agent(Agent):
                     min_reward_std=0.2, min_reward_margin=0.25,
                     action_span_only=False, max_updates_per_episode=0,
                     anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
-                    pairwise_beta=1.0):
+                    pairwise_beta=1.0, reward_geometry="xy",
+                    orientation_distance_scale=0.25 / math.radians(15.0),
+                    stop_distance_penalty=0.25,
+                    candidate_sampling="all_stochastic"):
         
         print("Initialize NaVIDA")
         
@@ -345,6 +356,10 @@ class NaVIDA_Agent(Agent):
             anchor_l2_weight=anchor_l2_weight,
             max_adapter_delta_norm=max_adapter_delta_norm,
             pairwise_beta=pairwise_beta,
+            reward_geometry=reward_geometry,
+            orientation_distance_scale=orientation_distance_scale,
+            stop_distance_penalty=stop_distance_penalty,
+            candidate_sampling=candidate_sampling,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -607,6 +622,11 @@ class NaVIDA_Agent(Agent):
             "adapter_delta_norm": update_result["adapter_delta_norm"],
             "action_span_only": update_result["action_span_only"],
             "action_spans_available": update_result["action_spans_available"],
+            "reward_geometry": update_result["reward_geometry"],
+            "orientation_distance_scale": update_result["orientation_distance_scale"],
+            "stop_distance_penalty": update_result["stop_distance_penalty"],
+            "candidate_sampling": update_result["candidate_sampling"],
+            "candidate_sampling_modes": update_result["candidate_sampling_modes"],
             "timing": update_result["timing"],
         })
         self.decision_step += 1
@@ -691,6 +711,17 @@ def main():
                         help="zero disables rollback on excessive episode adapter drift")
     parser.add_argument("--pairwise-beta",type=float,default=1.0,
                         help="positive scale for gated best-vs-worst action-token loss")
+    parser.add_argument("--reward-geometry",choices=("xy", "se2_stop"),default="xy",
+                        help="legacy XY or orientation/stop-aware trajectory consensus")
+    parser.add_argument("--orientation-distance-scale",type=float,
+                        default=0.25 / math.radians(15.0),
+                        help="meters per radian in se2_stop trajectory distance")
+    parser.add_argument("--stop-distance-penalty",type=float,default=0.25,
+                        help="meters assigned to a stop-state mismatch")
+    parser.add_argument("--candidate-sampling",
+                        choices=("all_stochastic", "greedy_plus_stochastic"),
+                        default="all_stochastic",
+                        help="candidate generation composition in stable order")
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -713,6 +744,8 @@ def main():
         raise ValueError("adapter drift controls must be non-negative")
     if args.pairwise_beta <= 0:
         raise ValueError("pairwise-beta must be positive")
+    if args.orientation_distance_scale < 0 or args.stop_distance_penalty < 0:
+        raise ValueError("trajectory distance scales must be non-negative")
     if args.official_navida_protocol and args.max_action_history != 200:
         raise ValueError("official-navida-protocol requires --max-action-history 200")
     seed_all(args.seed)
@@ -794,6 +827,10 @@ def main():
             "anchor_l2_weight": args.anchor_l2_weight,
             "max_adapter_delta_norm": args.max_adapter_delta_norm,
             "pairwise_beta": args.pairwise_beta,
+            "reward_geometry": args.reward_geometry,
+            "orientation_distance_scale": args.orientation_distance_scale,
+            "stop_distance_penalty": args.stop_distance_penalty,
+            "candidate_sampling": args.candidate_sampling,
         },
     )
 
@@ -804,7 +841,9 @@ def main():
                 args.early_stop_steps, args.disable_update, args.stop_trace,
                 args.official_navida_protocol, args.update_policy, args.min_reward_std,
                 args.min_reward_margin, args.action_span_only, args.max_updates_per_episode,
-                args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta)
+                args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta,
+                args.reward_geometry, args.orientation_distance_scale,
+                args.stop_distance_penalty, args.candidate_sampling)
 
 if __name__ == "__main__":
     main()

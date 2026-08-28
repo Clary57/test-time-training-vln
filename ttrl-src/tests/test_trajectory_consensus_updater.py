@@ -8,6 +8,7 @@ Run with the project environment, for example:
 import ast
 import importlib.util
 import json
+import math
 import random
 import sys
 import tempfile
@@ -69,13 +70,19 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             self.register_buffer("class_offsets", torch.linspace(-1.0, 1.0, 8))
             self.forward_use_cache = []
             self.generate_calls = 0
+            self.generated_count = 0
+            self.generate_configs = []
 
         def generate(self, input_ids, **kwargs):
-            count = kwargs["generation_config"].num_return_sequences
-            if count == 1:
-                tokens = self.completion_tokens[self.generate_calls:self.generate_calls + 1]
-            else:
-                tokens = self.completion_tokens
+            generation_config = kwargs["generation_config"]
+            self.generate_configs.append(generation_config)
+            count = generation_config.num_return_sequences
+            indices = [
+                (self.generated_count + offset) % len(self.completion_tokens)
+                for offset in range(count)
+            ]
+            tokens = self.completion_tokens[indices]
+            self.generated_count += count
             self.generate_calls += 1
             completion_ids = torch.stack(
                 [tokens, torch.zeros(count, dtype=torch.long, device=input_ids.device)],
@@ -139,6 +146,137 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual(result["selected_actions"], [1])
         self.assertEqual(len(result["rewards"]), 3)
         self.assertFalse(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_default_sampling_remains_all_stochastic_in_one_batch(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {3: "forward 25 cm", 4: "turn left 15 degree"},
+        )
+        updater.reset_episode("default-sampling")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(model.generate_calls, 1)
+        self.assertEqual(model.generate_configs[0].num_return_sequences, 3)
+        self.assertTrue(model.generate_configs[0].do_sample)
+        self.assertEqual(result["candidate_sampling_modes"], ["stochastic"] * 3)
+
+    def test_hybrid_sampling_is_greedy_then_stochastic_with_stable_order(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "forward 25 cm",
+                4: "turn left 15 degree",
+                5: "forward 75 cm",
+            },
+            candidate_sampling="greedy_plus_stochastic",
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("hybrid-sampling")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(model.generate_calls, 3)
+        self.assertFalse(model.generate_configs[0].do_sample)
+        self.assertEqual(model.generate_configs[0].num_return_sequences, 1)
+        self.assertTrue(model.generate_configs[1].do_sample)
+        self.assertEqual(
+            [config.num_return_sequences for config in model.generate_configs], [1, 1, 1]
+        )
+        self.assertEqual(result["candidate_actions"], [[1], [2], [1, 1, 1]])
+        self.assertEqual(
+            result["candidate_sampling_modes"], ["greedy", "stochastic", "stochastic"]
+        )
+
+    def test_hybrid_sequential_generation_keeps_one_config_per_candidate(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {3: "forward 25 cm", 4: "turn left 15 degree", 5: "forward 75 cm"},
+            candidate_sampling="greedy_plus_stochastic",
+            sequential_generation=True,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("hybrid-sequential")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual([config.num_return_sequences for config in model.generate_configs], [1] * 3)
+        self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
+        self.assertEqual(result["candidate_actions"], [[1], [2], [1, 1, 1]])
+
+    def test_se2_stop_distance_distinguishes_orientation_and_stop(self):
+        _, legacy = self._updater([3], {3: "forward 25 cm"})
+        _, se2 = self._updater(
+            [3], {3: "forward 25 cm"}, reward_geometry="se2_stop"
+        )
+        left = legacy._trajectory([2])[-1]
+        right = legacy._trajectory([3])[-1]
+        self.assertEqual(legacy._trajectory_point_distance(left, right), 0.0)
+        self.assertGreater(se2._trajectory_point_distance(
+            se2._trajectory([2])[-1], se2._trajectory([3])[-1]
+        ), 0.0)
+        self.assertGreater(se2._trajectory_point_distance(
+            se2._trajectory([0])[-1], se2._trajectory([])[-1]
+        ), 0.0)
+
+    def test_se2_reward_resolves_rotation_consensus_ignored_by_legacy_xy(self):
+        _, legacy = self._updater([3], {3: "forward 25 cm"})
+        _, se2 = self._updater(
+            [3], {3: "forward 25 cm"}, reward_geometry="se2_stop"
+        )
+        actions = [[2], [2], [3]]
+        self.assertEqual(legacy._consensus_rewards(actions, [True] * 3), [1.0] * 3)
+        self.assertEqual(se2._consensus_rewards(actions, [True] * 3), [1.0, 1.0, -1.0])
+
+    def test_hybrid_trace_on_off_preserves_candidates_actions_and_rng(self):
+        outcomes = []
+        for trace_enabled in (False, True):
+            model, updater = self._updater(
+                [3, 4, 5],
+                {
+                    3: "forward 25 cm",
+                    4: "turn left 15 degree",
+                    5: "forward 75 cm",
+                },
+                candidate_sampling="greedy_plus_stochastic",
+                trace_metadata_enabled=trace_enabled,
+            )
+            updater.reset_episode("hybrid-trace-equivalence")
+            result = updater.adapt_step(self._inputs())
+            outcomes.append((
+                result["selected_actions"], result["rewards"],
+                [config.do_sample for config in model.generate_configs],
+                random.getstate(), torch.random.get_rng_state(),
+            ))
+        self.assertEqual(outcomes[0][:4], outcomes[1][:4])
+        self.assertTrue(torch.equal(outcomes[0][4], outcomes[1][4]))
+
+    def test_se2_stop_trajectory_ends_at_first_stop(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, reward_geometry="se2_stop"
+        )
+        trajectory = updater._trajectory([1, 0, 1, 2])
+        self.assertEqual(len(trajectory), 3)
+        self.assertEqual(trajectory[-1][3], 1.0)
+
+    def test_se2_angle_distance_wraps_at_pi(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, reward_geometry="se2_stop"
+        )
+        first = [0.0, 0.0, math.radians(179), 0.0]
+        second = [0.0, 0.0, math.radians(-179), 0.0]
+        self.assertAlmostEqual(
+            updater._trajectory_point_distance(first, second),
+            updater.orientation_distance_scale * math.radians(2),
+            places=7,
+        )
+
+    def test_new_controls_reject_invalid_values(self):
+        for kwargs in (
+            {"reward_geometry": "unknown"},
+            {"candidate_sampling": "unknown"},
+            {"orientation_distance_scale": -1.0},
+            {"stop_distance_penalty": -1.0},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                self._updater([3], {3: "forward 25 cm"}, **kwargs)
 
     def test_adapt_step_updates_only_lora_and_reset_restores_base_and_optimizer(self):
         model, updater = self._updater(

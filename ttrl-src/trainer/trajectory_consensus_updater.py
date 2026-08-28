@@ -47,6 +47,10 @@ class TrajectoryConsensusUpdater:
         anchor_l2_weight: float = 0.0,
         max_adapter_delta_norm: float = 0.0,
         pairwise_beta: float = 1.0,
+        reward_geometry: str = "xy",
+        orientation_distance_scale: float = 0.25 / math.radians(15.0),
+        stop_distance_penalty: float = 0.25,
+        candidate_sampling: str = "all_stochastic",
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -72,6 +76,14 @@ class TrajectoryConsensusUpdater:
             raise ValueError("adapter drift controls must be non-negative")
         if pairwise_beta <= 0:
             raise ValueError("pairwise_beta must be positive")
+        if reward_geometry not in {"xy", "se2_stop"}:
+            raise ValueError("reward_geometry must be 'xy' or 'se2_stop'")
+        if orientation_distance_scale < 0 or stop_distance_penalty < 0:
+            raise ValueError("trajectory distance scales must be non-negative")
+        if candidate_sampling not in {"all_stochastic", "greedy_plus_stochastic"}:
+            raise ValueError(
+                "candidate_sampling must be 'all_stochastic' or 'greedy_plus_stochastic'"
+            )
         self.update_policy = update_policy
         self.min_reward_std = min_reward_std
         self.min_reward_margin = min_reward_margin
@@ -80,6 +92,10 @@ class TrajectoryConsensusUpdater:
         self.anchor_l2_weight = anchor_l2_weight
         self.max_adapter_delta_norm = max_adapter_delta_norm
         self.pairwise_beta = pairwise_beta
+        self.reward_geometry = reward_geometry
+        self.orientation_distance_scale = orientation_distance_scale
+        self.stop_distance_penalty = stop_distance_penalty
+        self.candidate_sampling = candidate_sampling
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -93,7 +109,6 @@ class TrajectoryConsensusUpdater:
             repetition_penalty=1.05,
             num_return_sequences=num_generations,
         )
-
         self.trainable_parameters = [
             (name, parameter)
             for name, parameter in self.model.named_parameters()
@@ -108,6 +123,30 @@ class TrajectoryConsensusUpdater:
         self.optimizer = self._new_optimizer()
         self.update_opportunity_count = 0
         self.optimizer_step_count = 0
+
+    def _candidate_generation_configs(self) -> List[GenerationConfig]:
+        """Return generation configs in stable candidate order."""
+        if self.candidate_sampling == "all_stochastic":
+            if not self.sequential_generation:
+                return [self.generation_config]
+            configs = []
+            for _ in range(self.num_generations):
+                config = GenerationConfig.from_dict(self.generation_config.to_dict())
+                config.num_return_sequences = 1
+                configs.append(config)
+            return configs
+
+        greedy = GenerationConfig.from_dict(self.generation_config.to_dict())
+        greedy.do_sample = False
+        greedy.num_return_sequences = 1
+        if self.num_generations == 1:
+            return [greedy]
+        stochastic = []
+        for _ in range(self.num_generations - 1):
+            config = GenerationConfig.from_dict(self.generation_config.to_dict())
+            config.num_return_sequences = 1
+            stochastic.append(config)
+        return [greedy, *stochastic]
 
     def _new_optimizer(self) -> torch.optim.Optimizer:
         return torch.optim.AdamW(
@@ -369,25 +408,13 @@ class TrajectoryConsensusUpdater:
         generation_start = time.perf_counter()
         self.model.eval()
         with torch.inference_mode():
-            if self.sequential_generation:
-                single_generation_config = GenerationConfig.from_dict(
-                    self.generation_config.to_dict()
-                )
-                single_generation_config.num_return_sequences = 1
-                generated_batches = [
-                    self.model.generate(
-                        **prompt_inputs,
-                        generation_config=single_generation_config,
-                        use_model_defaults=True,
-                    )
-                    for _ in range(self.num_generations)
-                ]
-            else:
-                generated_batches = [self.model.generate(
+            candidate_generation_configs = self._candidate_generation_configs()
+            generated_batches = [self.model.generate(
                     **prompt_inputs,
-                    generation_config=self.generation_config,
+                    generation_config=generation_config,
                     use_model_defaults=True,
-                )]
+                ) for generation_config in candidate_generation_configs]
+        separate_candidate_batches = len(generated_batches) > 1
         # Tensors created in inference_mode cannot be saved by the subsequent
         # autograd graph.  Clone outside the context before teacher-forcing the
         # sampled tokens through the trainable LoRA model.
@@ -417,7 +444,7 @@ class TrajectoryConsensusUpdater:
 
         loss_forward_start = time.perf_counter()
         self.model.train()
-        if self.sequential_generation:
+        if separate_candidate_batches:
             per_token_logps_batches = []
             for prompt_completion_ids, completion_mask in zip(
                 prompt_completion_batches, completion_masks
@@ -458,7 +485,7 @@ class TrajectoryConsensusUpdater:
             )
         # The detached copy makes this the usual score-function surrogate while
         # retaining a differentiable tensor for the all-equal-reward case.
-        if self.sequential_generation:
+        if separate_candidate_batches:
             per_candidate_loss = []
             for index, (per_token_logps, completion_mask) in enumerate(
                 zip(per_token_logps_batches, action_span_masks)
@@ -611,6 +638,15 @@ class TrajectoryConsensusUpdater:
             "action_span_only": self.action_span_only,
             "action_spans_available": action_spans_available,
             "pairwise_beta": self.pairwise_beta,
+            "reward_geometry": self.reward_geometry,
+            "orientation_distance_scale": self.orientation_distance_scale,
+            "stop_distance_penalty": self.stop_distance_penalty,
+            "candidate_sampling": self.candidate_sampling,
+            "candidate_sampling_modes": [
+                "stochastic" if config.do_sample else "greedy"
+                for config in candidate_generation_configs
+                for _ in range(config.num_return_sequences)
+            ],
             "completions": completions,
         }
         if self.trace_metadata_enabled:
@@ -697,10 +733,11 @@ class TrajectoryConsensusUpdater:
         distances = np.zeros((valid_count, valid_count), dtype=np.float32)
         for i in range(valid_count):
             for j in range(i + 1, valid_count):
-                distance, _ = fastdtw(
-                    trajectories[i], trajectories[j],
-                    dist=lambda first, second: np.linalg.norm(np.asarray(first[:2]) - np.asarray(second[:2])),
+                distance, path = fastdtw(
+                    trajectories[i], trajectories[j], dist=self._trajectory_point_distance
                 )
+                if self.reward_geometry == "se2_stop":
+                    distance /= max(1, len(path))
                 distances[i, j] = distance
                 distances[j, i] = distance
         mean_distance = distances.mean(axis=1)
@@ -713,9 +750,15 @@ class TrajectoryConsensusUpdater:
 
     def _trajectory(self, action_sequence: Sequence[int]) -> List[List[float]]:
         x = y = theta = 0.0
-        trajectory = [[x, y, theta]]
+        stopped = 0.0
+        trajectory = [
+            [x, y, theta, stopped]
+            if self.reward_geometry == "se2_stop" else [x, y, theta]
+        ]
         for action in action_sequence:
-            if action == 1:
+            if action == 0 and self.reward_geometry == "se2_stop":
+                stopped = 1.0
+            elif action == 1:
                 x += (self.forward_distance / 100.0) * math.cos(theta)
                 y += (self.forward_distance / 100.0) * math.sin(theta)
             elif action == 2:
@@ -723,5 +766,24 @@ class TrajectoryConsensusUpdater:
             elif action == 3:
                 theta -= math.radians(self.turn_angle)
             theta = (theta + math.pi) % (2 * math.pi) - math.pi
-            trajectory.append([x, y, theta])
+            trajectory.append(
+                [x, y, theta, stopped]
+                if self.reward_geometry == "se2_stop" else [x, y, theta]
+            )
+            if stopped:
+                break
         return trajectory
+
+    def _trajectory_point_distance(self, first: Sequence[float], second: Sequence[float]) -> float:
+        if self.reward_geometry == "xy":
+            return float(np.linalg.norm(np.asarray(first[:2]) - np.asarray(second[:2])))
+        angle_delta = math.atan2(
+            math.sin(first[2] - second[2]), math.cos(first[2] - second[2])
+        )
+        values = (
+            first[0] - second[0],
+            first[1] - second[1],
+            self.orientation_distance_scale * angle_delta,
+            self.stop_distance_penalty * (first[3] - second[3]),
+        )
+        return math.sqrt(sum(value * value for value in values))
