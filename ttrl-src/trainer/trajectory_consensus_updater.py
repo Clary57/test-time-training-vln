@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import re
 import time
 from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from fastdtw import fastdtw
 from transformers import GenerationConfig
 
@@ -37,6 +39,14 @@ class TrajectoryConsensusUpdater:
         disable_update: bool = False,
         trace_metadata_enabled: bool = False,
         sequential_generation: bool = False,
+        update_policy: str = "legacy",
+        min_reward_std: float = 0.2,
+        min_reward_margin: float = 0.25,
+        action_span_only: bool = False,
+        max_updates_per_episode: int = 0,
+        anchor_l2_weight: float = 0.0,
+        max_adapter_delta_norm: float = 0.0,
+        pairwise_beta: float = 1.0,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -52,6 +62,24 @@ class TrajectoryConsensusUpdater:
         self.disable_update = disable_update
         self.trace_metadata_enabled = trace_metadata_enabled
         self.sequential_generation = sequential_generation
+        if update_policy not in {"legacy", "gated"}:
+            raise ValueError("update_policy must be 'legacy' or 'gated'")
+        if min_reward_std < 0 or min_reward_margin < 0:
+            raise ValueError("reward gate thresholds must be non-negative")
+        if max_updates_per_episode < 0:
+            raise ValueError("max_updates_per_episode must be non-negative")
+        if anchor_l2_weight < 0 or max_adapter_delta_norm < 0:
+            raise ValueError("adapter drift controls must be non-negative")
+        if pairwise_beta <= 0:
+            raise ValueError("pairwise_beta must be positive")
+        self.update_policy = update_policy
+        self.min_reward_std = min_reward_std
+        self.min_reward_margin = min_reward_margin
+        self.action_span_only = action_span_only
+        self.max_updates_per_episode = max_updates_per_episode
+        self.anchor_l2_weight = anchor_l2_weight
+        self.max_adapter_delta_norm = max_adapter_delta_norm
+        self.pairwise_beta = pairwise_beta
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -78,6 +106,8 @@ class TrajectoryConsensusUpdater:
             for name, parameter in self.trainable_parameters
         }
         self.optimizer = self._new_optimizer()
+        self.update_opportunity_count = 0
+        self.optimizer_step_count = 0
 
     def _new_optimizer(self) -> torch.optim.Optimizer:
         return torch.optim.AdamW(
@@ -105,6 +135,8 @@ class TrajectoryConsensusUpdater:
             for name, parameter in self.trainable_parameters:
                 parameter.copy_(self.base_adapter_state[name].to(parameter.device, parameter.dtype))
         self.optimizer = self._new_optimizer()
+        self.update_opportunity_count = 0
+        self.optimizer_step_count = 0
 
     def adapter_norm(self) -> float:
         with torch.no_grad():
@@ -124,6 +156,157 @@ class TrajectoryConsensusUpdater:
             digest.update(str(tuple(tensor.shape)).encode("ascii"))
             digest.update(tensor.reshape(-1).view(torch.uint8).cpu().numpy().tobytes())
         return digest.hexdigest()
+
+    def adapter_delta_norm(self) -> float:
+        """Return the L2 distance from the episode's initial adapter."""
+        with torch.no_grad():
+            squared_norm = sum(
+                (parameter.detach().float() - self.base_adapter_state[name].to(
+                    parameter.device, torch.float32
+                )).pow(2).sum()
+                for name, parameter in self.trainable_parameters
+            )
+            return float(squared_norm.sqrt().item())
+
+    def _anchor_l2_loss(self) -> torch.Tensor:
+        squared_sum = None
+        element_count = 0
+        for name, parameter in self.trainable_parameters:
+            difference = parameter.float() - self.base_adapter_state[name].to(
+                parameter.device, torch.float32
+            )
+            term = difference.pow(2).sum()
+            squared_sum = term if squared_sum is None else squared_sum + term
+            element_count += parameter.numel()
+        return squared_sum / max(1, element_count)
+
+    @staticmethod
+    def _find_subsequence(sequence: Sequence[int], subsequence: Sequence[int]) -> int | None:
+        if not subsequence or len(subsequence) > len(sequence):
+            return None
+        for start in range(len(sequence) - len(subsequence) + 1):
+            if list(sequence[start:start + len(subsequence)]) == list(subsequence):
+                return start
+        return None
+
+    def _action_span_mask(
+        self,
+        completion_ids: torch.Tensor,
+        completion_mask: torch.Tensor,
+        completion: str,
+    ) -> Tuple[torch.Tensor, bool]:
+        """Mask only answer/action tokens without changing generated token IDs.
+
+        Plain action-only generations already consist entirely of action tokens.
+        Tagged completions must expose an exact tokenized answer subsequence; if
+        they do not, gated mode skips the update rather than training unrelated
+        explanation or formatting tokens.
+        """
+        answer_match = re.search(r"<answer>(.*?)</answer>", completion, flags=re.DOTALL)
+        if answer_match is None:
+            # Current NaVIDA generations are plain action strings.  In that
+            # case the whole textual completion is the action span, but EOS is
+            # a sequence-control token rather than part of the navigation action.
+            mask = completion_mask.clone()
+            mask[completion_ids == self.processor.tokenizer.eos_token_id] = 0
+            return mask, bool(mask.sum().item())
+        answer = answer_match.group(1).strip()
+        if not answer:
+            return torch.zeros_like(completion_mask), False
+        token_ids = completion_ids.detach().cpu().tolist()
+        valid_length = int(completion_mask.sum().item())
+        token_ids = token_ids[:valid_length]
+        for candidate_text in (answer, f" {answer}"):
+            encoded = self.processor.tokenizer.encode(
+                candidate_text, add_special_tokens=False
+            )
+            start = self._find_subsequence(token_ids, encoded)
+            if start is None:
+                continue
+            mask = torch.zeros_like(completion_mask)
+            mask[start:start + len(encoded)] = 1
+            return mask, True
+        return torch.zeros_like(completion_mask), False
+
+    def _action_span_masks(
+        self,
+        completion_id_batches: Sequence[torch.Tensor],
+        completion_masks: Sequence[torch.Tensor],
+        completions: Sequence[str],
+    ) -> Tuple[List[torch.Tensor], List[bool]]:
+        masks: List[torch.Tensor] = []
+        available: List[bool] = []
+        completion_index = 0
+        for ids_batch, mask_batch in zip(completion_id_batches, completion_masks):
+            batch_masks = []
+            for ids, base_mask in zip(ids_batch, mask_batch):
+                span_mask, found = self._action_span_mask(
+                    ids, base_mask, completions[completion_index]
+                )
+                batch_masks.append(span_mask)
+                available.append(found)
+                completion_index += 1
+            masks.append(torch.stack(batch_masks))
+        return masks, available
+
+    def _update_gate(
+        self,
+        rewards: Sequence[float],
+        valid: Sequence[bool],
+        action_spans_available: Sequence[bool],
+    ) -> Tuple[bool, str, float, float]:
+        valid_rewards = [float(reward) for reward, is_valid in zip(rewards, valid) if is_valid]
+        reward_std = float(np.std(valid_rewards)) if valid_rewards else 0.0
+        sorted_rewards = sorted(valid_rewards, reverse=True)
+        reward_margin = (
+            sorted_rewards[0] - sorted_rewards[1] if len(sorted_rewards) >= 2 else 0.0
+        )
+        if self.update_policy == "legacy":
+            return True, "legacy_policy", reward_std, reward_margin
+        if len(valid_rewards) != self.num_generations:
+            return False, "not_all_candidates_valid", reward_std, reward_margin
+        if reward_std < self.min_reward_std:
+            return False, "reward_std_below_threshold", reward_std, reward_margin
+        best_count = sum(abs(reward - sorted_rewards[0]) < 1e-8 for reward in valid_rewards)
+        if best_count != 1:
+            return False, "best_candidate_not_unique", reward_std, reward_margin
+        if reward_margin < self.min_reward_margin:
+            return False, "reward_margin_below_threshold", reward_std, reward_margin
+        if self.action_span_only and not all(action_spans_available):
+            return False, "action_span_unavailable", reward_std, reward_margin
+        if (
+            self.max_updates_per_episode > 0
+            and self.update_opportunity_count >= self.max_updates_per_episode
+        ):
+            return False, "episode_update_limit_reached", reward_std, reward_margin
+        return True, "eligible", reward_std, reward_margin
+
+    def _parameter_snapshot(self) -> List[torch.Tensor]:
+        return [parameter.detach().cpu().clone() for _, parameter in self.trainable_parameters]
+
+    def _restore_parameter_snapshot(self, snapshot: Sequence[torch.Tensor]) -> None:
+        with torch.no_grad():
+            for (_, parameter), before in zip(self.trainable_parameters, snapshot):
+                parameter.copy_(before.to(parameter.device, parameter.dtype))
+
+    @classmethod
+    def _clone_optimizer_value_to_cpu(cls, value: Any) -> Any:
+        if torch.is_tensor(value):
+            return value.detach().cpu().clone()
+        if isinstance(value, dict):
+            return {key: cls._clone_optimizer_value_to_cpu(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._clone_optimizer_value_to_cpu(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._clone_optimizer_value_to_cpu(item) for item in value)
+        return value
+
+    def _optimizer_snapshot(self) -> Dict[str, Any]:
+        return self._clone_optimizer_value_to_cpu(self.optimizer.state_dict())
+
+    def _restore_optimizer_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        self.optimizer = self._new_optimizer()
+        self.optimizer.load_state_dict(snapshot)
 
     def _completion_mask(self, completion_ids: torch.Tensor) -> torch.Tensor:
         eos_token_id = self.processor.tokenizer.eos_token_id
@@ -223,6 +406,14 @@ class TrajectoryConsensusUpdater:
         valid_count = int(sum(valid_list))
         selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
         selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
+        action_span_masks, action_spans_available = self._action_span_masks(
+            completion_id_batches, completion_masks, completions
+        ) if self.action_span_only else (completion_masks, [True] * len(completions))
+        update_eligible, update_gate_reason, reward_std, reward_margin = self._update_gate(
+            rewards_list, valid_list, action_spans_available
+        )
+        if self.update_policy == "gated" and update_eligible and before_checksum is None:
+            before_checksum = self.adapter_checksum()
 
         loss_forward_start = time.perf_counter()
         self.model.train()
@@ -270,7 +461,7 @@ class TrajectoryConsensusUpdater:
         if self.sequential_generation:
             per_candidate_loss = []
             for index, (per_token_logps, completion_mask) in enumerate(
-                zip(per_token_logps_batches, completion_masks)
+                zip(per_token_logps_batches, action_span_masks)
             ):
                 per_token_loss = -torch.exp(
                     per_token_logps - per_token_logps.detach()
@@ -283,7 +474,7 @@ class TrajectoryConsensusUpdater:
             zero_loss = sum(batch.sum() * 0.0 for batch in per_token_logps_batches)
         else:
             per_token_logps = per_token_logps_batches[0]
-            completion_mask = completion_masks[0]
+            completion_mask = action_span_masks[0]
             per_token_loss = -torch.exp(
                 per_token_logps - per_token_logps.detach()
             ) * advantages.unsqueeze(1)
@@ -292,7 +483,35 @@ class TrajectoryConsensusUpdater:
                 / completion_mask.sum(dim=1).clamp_min(1)
             )
             zero_loss = per_token_logps.sum() * 0.0
-        loss = per_candidate_loss[valid_mask].mean() if valid_count else zero_loss
+        legacy_policy_loss = per_candidate_loss[valid_mask].mean() if valid_count else zero_loss
+        if self.update_policy == "gated" and update_eligible:
+            candidate_mean_logps = []
+            for per_token_logps, loss_mask in zip(per_token_logps_batches, action_span_masks):
+                candidate_mean_logps.extend(
+                    (per_token_logps * loss_mask).sum(dim=1)
+                    / loss_mask.sum(dim=1).clamp_min(1)
+                )
+            candidate_mean_logps = torch.stack(candidate_mean_logps)
+            valid_indices = [index for index, is_valid in enumerate(valid_list) if is_valid]
+            best_index = selected_candidate_index
+            worst_index = min(valid_indices, key=lambda index: (rewards_list[index], index))
+            policy_loss = -F.logsigmoid(
+                self.pairwise_beta
+                * (candidate_mean_logps[best_index] - candidate_mean_logps[worst_index])
+            )
+            policy_loss_type = "best_vs_worst_action_logp"
+        elif self.update_policy == "gated":
+            policy_loss = zero_loss
+            policy_loss_type = "skipped_by_gate"
+        else:
+            policy_loss = legacy_policy_loss
+            policy_loss_type = "legacy_standardized_advantage"
+        anchor_loss = (
+            self._anchor_l2_loss()
+            if update_eligible and self.anchor_l2_weight > 0
+            else zero_loss
+        )
+        loss = policy_loss + self.anchor_l2_weight * anchor_loss
         timing["loss_forward"] = time.perf_counter() - loss_forward_start
 
         backward_start = time.perf_counter()
@@ -305,11 +524,49 @@ class TrajectoryConsensusUpdater:
             torch.nn.utils.clip_grad_norm_(
                 [parameter for _, parameter in self.trainable_parameters], self.max_grad_norm
             )
-        if not self.disable_update:
+        optimizer_step_executed = False
+        update_rolled_back = False
+        rollback_reason = None
+        parameter_snapshot = None
+        optimizer_snapshot = None
+        protection_enabled = (
+            self.update_policy == "gated" or self.max_adapter_delta_norm > 0
+        )
+        if update_eligible:
+            self.update_opportunity_count += 1
+        if not self.disable_update and update_eligible:
+            if protection_enabled:
+                parameter_snapshot = self._parameter_snapshot()
+                optimizer_snapshot = self._optimizer_snapshot()
             self.optimizer.step()
+            optimizer_step_executed = True
+            if protection_enabled:
+                parameters_finite = all(
+                    bool(torch.isfinite(parameter.detach()).all().item())
+                    for _, parameter in self.trainable_parameters
+                )
+                adapter_delta_norm = self.adapter_delta_norm()
+                if not parameters_finite:
+                    rollback_reason = "nonfinite_adapter_parameter"
+                elif (
+                    self.max_adapter_delta_norm > 0
+                    and adapter_delta_norm > self.max_adapter_delta_norm
+                ):
+                    rollback_reason = "adapter_delta_norm_exceeded"
+                if rollback_reason is not None:
+                    self._restore_parameter_snapshot(parameter_snapshot)
+                    self._restore_optimizer_snapshot(optimizer_snapshot)
+                    optimizer_step_executed = False
+                    update_rolled_back = True
+            if optimizer_step_executed:
+                self.optimizer_step_count += 1
         timing["optimizer"] = time.perf_counter() - optimizer_start
         after_norm = self.adapter_norm()
-        after_checksum = self.adapter_checksum() if self.disable_update else None
+        adapter_delta_norm = self.adapter_delta_norm() if protection_enabled else None
+        checksum_required = self.disable_update or (
+            self.update_policy == "gated" and update_eligible
+        )
+        after_checksum = self.adapter_checksum() if checksum_required else None
         parameters_unchanged = None
         if self.disable_update:
             parameters_unchanged = all(
@@ -318,12 +575,20 @@ class TrajectoryConsensusUpdater:
             )
             if not parameters_unchanged or before_checksum != after_checksum or before_norm != after_norm:
                 raise RuntimeError("LoRA parameters changed while optimizer updates were disabled")
+        elif self.update_policy == "gated":
+            parameters_unchanged = (
+                True if not update_eligible else before_checksum == after_checksum
+            )
 
         result = {
             "selected_actions": selected_actions,
             "loss": float(loss.detach().item()),
+            "policy_loss": float(policy_loss.detach().item()),
+            "policy_loss_type": policy_loss_type,
+            "anchor_loss": float(anchor_loss.detach().item()),
             "rewards": [float(reward) for reward in rewards_list],
-            "reward_std": float(np.std([rewards_list[i] for i, valid in enumerate(valid_list) if valid])) if valid_count else 0.0,
+            "reward_std": reward_std,
+            "reward_margin": reward_margin,
             "valid_count": valid_count,
             "timing": timing,
             "adapter_norm_before": before_norm,
@@ -331,7 +596,21 @@ class TrajectoryConsensusUpdater:
             "adapter_checksum_before": before_checksum,
             "adapter_checksum_after": after_checksum,
             "parameters_unchanged": parameters_unchanged,
-            "update_enabled": not self.disable_update,
+            "update_enabled": optimizer_step_executed,
+            "update_eligible": update_eligible,
+            "update_gate_reason": update_gate_reason,
+            "optimizer_step_executed": optimizer_step_executed,
+            "effective_parameter_change": (
+                None if parameters_unchanged is None else not parameters_unchanged
+            ),
+            "update_rolled_back": update_rolled_back,
+            "rollback_reason": rollback_reason,
+            "episode_update_opportunities": self.update_opportunity_count,
+            "episode_optimizer_steps": self.optimizer_step_count,
+            "adapter_delta_norm": adapter_delta_norm,
+            "action_span_only": self.action_span_only,
+            "action_spans_available": action_spans_available,
+            "pairwise_beta": self.pairwise_beta,
             "completions": completions,
         }
         if self.trace_metadata_enabled:

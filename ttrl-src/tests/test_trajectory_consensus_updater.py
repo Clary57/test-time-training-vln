@@ -40,6 +40,19 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         class Tokenizer:
             eos_token_id = 0
 
+            @staticmethod
+            def encode(text, add_special_tokens=False):
+                del add_special_tokens
+                normalized = text.strip().lower()
+                mapping = {
+                    "forward 25 cm": [3],
+                    "forward 50 cm": [4],
+                    "forward 75 cm": [5],
+                    "turn left 15 degree": [4],
+                    "turn right 15 degree": [6],
+                }
+                return mapping.get(normalized, [7])
+
         def __init__(self, completions):
             self.tokenizer = self.Tokenizer()
             self.completions = completions
@@ -87,7 +100,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         }
 
     def _updater(self, completion_tokens, completions, disable_update=False,
-                 trace_metadata_enabled=False, sequential_generation=False):
+                 trace_metadata_enabled=False, sequential_generation=False, **kwargs):
         model = self.FakeModel(completion_tokens)
         updater = TrajectoryConsensusUpdater(
             model,
@@ -101,6 +114,7 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             disable_update=disable_update,
             trace_metadata_enabled=trace_metadata_enabled,
             sequential_generation=sequential_generation,
+            **kwargs,
         )
         return model, updater
 
@@ -242,6 +256,239 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         result = updater.adapt_step(self._inputs())
         self.assertTrue(result["update_enabled"])
         self.assertFalse(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_explicit_legacy_policy_matches_default_actions_loss_and_parameters(self):
+        arguments = (
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+        )
+        results = []
+        for kwargs in ({}, {"update_policy": "legacy"}):
+            model, updater = self._updater(*arguments, **kwargs)
+            updater.reset_episode("legacy-equivalence")
+            result = updater.adapt_step(self._inputs())
+            results.append((result, model.lora_adapter.detach().clone(), random.getstate()))
+        self.assertEqual(results[0][0]["selected_actions"], results[1][0]["selected_actions"])
+        self.assertEqual(results[0][0]["rewards"], results[1][0]["rewards"])
+        self.assertEqual(results[0][0]["loss"], results[1][0]["loss"])
+        self.assertTrue(torch.equal(results[0][1], results[1][1]))
+        self.assertEqual(results[0][2], results[1][2])
+
+    def test_default_legacy_path_does_not_snapshot_or_compute_drift_guard(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {3: "<answer>forward 25 cm</answer>", 4: "<answer>turn left 15 degree</answer>"},
+        )
+        updater.reset_episode("legacy-no-protection-overhead")
+        with mock.patch.object(
+            updater, "_parameter_snapshot", side_effect=AssertionError("unexpected snapshot")
+        ), mock.patch.object(
+            updater, "_optimizer_snapshot", side_effect=AssertionError("unexpected snapshot")
+        ), mock.patch.object(
+            updater, "adapter_delta_norm", side_effect=AssertionError("unexpected drift check")
+        ):
+            result = updater.adapt_step(self._inputs())
+        self.assertTrue(result["optimizer_step_executed"])
+        self.assertIsNone(result["adapter_delta_norm"])
+        self.assertFalse(result["update_rolled_back"])
+
+    def test_gated_policy_skips_equal_rewards_and_tied_best(self):
+        cases = (
+            ([3, 3, 3], {3: "<answer>forward 25 cm</answer>"},
+             "reward_std_below_threshold"),
+            ([3, 3, 4], {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>turn left 15 degree</answer>",
+            }, "best_candidate_not_unique"),
+        )
+        for tokens, completions, expected_reason in cases:
+            model, updater = self._updater(tokens, completions, update_policy="gated")
+            updater.reset_episode(expected_reason)
+            before = model.lora_adapter.detach().clone()
+            result = updater.adapt_step(self._inputs())
+            self.assertFalse(result["update_eligible"])
+            self.assertFalse(result["optimizer_step_executed"])
+            self.assertFalse(result["update_enabled"])
+            self.assertEqual(result["update_gate_reason"], expected_reason)
+            self.assertTrue(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_gated_unique_medoid_updates_and_respects_episode_limit(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            update_policy="gated",
+            max_updates_per_episode=1,
+        )
+        updater.reset_episode("gated-limit")
+        first = updater.adapt_step(self._inputs())
+        second = updater.adapt_step(self._inputs())
+        self.assertEqual(first["rewards"], [-1.0, 1.0, -1.0])
+        self.assertTrue(first["update_eligible"])
+        self.assertTrue(first["optimizer_step_executed"])
+        self.assertTrue(first["effective_parameter_change"])
+        self.assertNotEqual(first["adapter_checksum_before"], first["adapter_checksum_after"])
+        self.assertEqual(first["policy_loss_type"], "best_vs_worst_action_logp")
+        self.assertGreater(first["policy_loss"], 0.0)
+        self.assertEqual(first["episode_optimizer_steps"], 1)
+        self.assertFalse(second["update_eligible"])
+        self.assertEqual(second["update_gate_reason"], "episode_update_limit_reached")
+        self.assertFalse(second["optimizer_step_executed"])
+        self.assertFalse(second["effective_parameter_change"])
+        self.assertEqual(second["episode_optimizer_steps"], 1)
+
+    def test_action_span_mask_selects_only_answer_tokens(self):
+        _, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            update_policy="gated",
+            action_span_only=True,
+        )
+        ids = torch.tensor([9, 3, 10, 0], dtype=torch.long)
+        base_mask = torch.ones(4)
+        mask, available = updater._action_span_mask(
+            ids, base_mask, "reason <answer>forward 25 cm</answer> trailing"
+        )
+        self.assertTrue(available)
+        self.assertEqual(mask.tolist(), [0.0, 1.0, 0.0, 0.0])
+
+        plain_mask, plain_available = updater._action_span_mask(
+            torch.tensor([3, 4, 0, 0], dtype=torch.long),
+            torch.tensor([1.0, 1.0, 1.0, 0.0]),
+            "forward 25 cm, forward 50 cm",
+        )
+        self.assertTrue(plain_available)
+        self.assertEqual(plain_mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+    def test_gated_action_span_unavailable_skips_without_fallback_training(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>unmapped forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            update_policy="gated",
+            action_span_only=True,
+        )
+        updater.reset_episode("missing-action-span")
+        before = model.lora_adapter.detach().clone()
+        result = updater.adapt_step(self._inputs())
+        self.assertFalse(result["update_eligible"])
+        self.assertEqual(result["update_gate_reason"], "action_span_unavailable")
+        self.assertTrue(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_gated_drift_limit_rolls_back_rejected_step(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            update_policy="gated",
+            max_adapter_delta_norm=1e-12,
+        )
+        updater.reset_episode("rollback")
+        before = model.lora_adapter.detach().clone()
+        result = updater.adapt_step(self._inputs())
+        self.assertTrue(result["update_eligible"])
+        self.assertTrue(result["update_rolled_back"])
+        self.assertEqual(result["rollback_reason"], "adapter_delta_norm_exceeded")
+        self.assertFalse(result["optimizer_step_executed"])
+        self.assertFalse(result["effective_parameter_change"])
+        self.assertEqual(result["adapter_delta_norm"], 0.0)
+        self.assertTrue(torch.equal(model.lora_adapter.detach(), before))
+        self.assertFalse(updater.optimizer.state)
+
+    def test_gated_anchor_penalty_and_rollback_preserve_prior_optimizer_state(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            update_policy="gated",
+            anchor_l2_weight=0.5,
+        )
+        updater.reset_episode("rollback-with-history")
+        first = updater.adapt_step(self._inputs())
+        self.assertTrue(first["optimizer_step_executed"])
+        parameter_before_rejected_step = model.lora_adapter.detach().clone()
+        optimizer_before = updater._optimizer_snapshot()
+        updater.max_adapter_delta_norm = 1e-12
+
+        second = updater.adapt_step(self._inputs())
+
+        self.assertGreater(second["anchor_loss"], 0.0)
+        self.assertTrue(second["update_rolled_back"])
+        self.assertTrue(torch.equal(model.lora_adapter.detach(), parameter_before_rejected_step))
+        optimizer_after = updater._optimizer_snapshot()
+        self.assertEqual(optimizer_before["param_groups"], optimizer_after["param_groups"])
+        self.assertEqual(optimizer_before["state"].keys(), optimizer_after["state"].keys())
+        for key in optimizer_before["state"]:
+            for field in optimizer_before["state"][key]:
+                before = optimizer_before["state"][key][field]
+                after = optimizer_after["state"][key][field]
+                if torch.is_tensor(before):
+                    self.assertTrue(torch.equal(before, after))
+                else:
+                    self.assertEqual(before, after)
+
+    def test_gated_disable_update_keeps_parameters_but_reports_eligibility(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+            disable_update=True,
+            update_policy="gated",
+        )
+        updater.reset_episode("gated-disabled")
+        before = model.lora_adapter.detach().clone()
+        result = updater.adapt_step(self._inputs())
+        self.assertTrue(result["update_eligible"])
+        self.assertFalse(result["optimizer_step_executed"])
+        self.assertFalse(result["update_enabled"])
+        self.assertTrue(result["parameters_unchanged"])
+        self.assertTrue(torch.equal(model.lora_adapter.detach(), before))
+
+    def test_gated_trace_on_off_preserves_candidates_actions_parameters_and_rng(self):
+        arguments = (
+            [3, 4, 5],
+            {
+                3: "<answer>forward 25 cm</answer>",
+                4: "<answer>forward 50 cm</answer>",
+                5: "<answer>forward 75 cm</answer>",
+            },
+        )
+        results = []
+        for trace_enabled in (False, True):
+            model, updater = self._updater(
+                *arguments,
+                trace_metadata_enabled=trace_enabled,
+                update_policy="gated",
+                action_span_only=True,
+            )
+            updater.reset_episode("gated-trace-noninterference")
+            result = updater.adapt_step(self._inputs())
+            results.append((result, model.lora_adapter.detach().clone(), random.getstate()))
+        self.assertEqual(results[0][0]["selected_actions"], results[1][0]["selected_actions"])
+        self.assertEqual(results[0][0]["rewards"], results[1][0]["rewards"])
+        self.assertEqual(results[0][0]["loss"], results[1][0]["loss"])
+        self.assertTrue(torch.equal(results[0][1], results[1][1]))
+        self.assertEqual(results[0][2], results[1][2])
+        self.assertEqual(results[1][0]["selected_candidate_index"], 1)
 
     def test_trace_metadata_exposes_existing_medoid_without_changing_choice(self):
         arguments = (

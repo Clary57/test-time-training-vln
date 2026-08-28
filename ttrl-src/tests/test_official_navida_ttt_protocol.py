@@ -75,8 +75,23 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "sequential_candidate_generation",
             "num_generations", "temperature", "learning_rate", "weight_decay",
             "max_grad_norm", "disable_update", "stop_trace",
+            "update_policy", "min_reward_std", "min_reward_margin",
+            "action_span_only", "max_updates_per_episode", "anchor_l2_weight",
+            "max_adapter_delta_norm", "pairwise_beta",
         ):
             self.assertIn(f'"{field}"', self.source)
+
+    def test_gated_update_controls_are_explicit_and_legacy_is_default(self):
+        self.assertIn(
+            'parser.add_argument("--update-policy",choices=("legacy", "gated"),default="legacy"',
+            self.source,
+        )
+        for option in (
+            "--min-reward-std", "--min-reward-margin", "--action-span-only",
+            "--max-updates-per-episode", "--anchor-l2-weight",
+            "--max-adapter-delta-norm", "--pairwise-beta",
+        ):
+            self.assertIn(option, self.source)
 
     def test_consensus_updater_remains_limited_to_two_action_chunks(self):
         updater = EVALUATOR.parents[1] / "trainer" / "trajectory_consensus_updater.py"

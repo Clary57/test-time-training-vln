@@ -146,7 +146,11 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
                     max_episodes=None, early_stop_rotation=25, early_stop_steps=400,
                     disable_update=False, stop_trace=False,
-                    official_navida_protocol=False) -> None:
+                    official_navida_protocol=False, update_policy="legacy",
+                    min_reward_std=0.2, min_reward_margin=0.25,
+                    action_span_only=False, max_updates_per_episode=0,
+                    anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
+                    pairwise_beta=1.0) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -174,7 +178,15 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         seed,
                         disable_update=disable_update,
                         stop_trace_enabled=stop_trace,
-                        official_navida_protocol=official_navida_protocol)
+                        official_navida_protocol=official_navida_protocol,
+                        update_policy=update_policy,
+                        min_reward_std=min_reward_std,
+                        min_reward_margin=min_reward_margin,
+                        action_span_only=action_span_only,
+                        max_updates_per_episode=max_updates_per_episode,
+                        anchor_l2_weight=anchor_l2_weight,
+                        max_adapter_delta_norm=max_adapter_delta_norm,
+                        pairwise_beta=pairwise_beta)
 
     num_episodes = len(env.episodes)
     
@@ -269,7 +281,11 @@ class NaVIDA_Agent(Agent):
                     turn_angle, max_action_history, resolution_ratio, num_generations,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
                     require_map=True, disable_update=False, stop_trace_enabled=False,
-                    official_navida_protocol=False):
+                    official_navida_protocol=False, update_policy="legacy",
+                    min_reward_std=0.2, min_reward_margin=0.25,
+                    action_span_only=False, max_updates_per_episode=0,
+                    anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
+                    pairwise_beta=1.0):
         
         print("Initialize NaVIDA")
         
@@ -321,6 +337,14 @@ class NaVIDA_Agent(Agent):
             disable_update=disable_update,
             trace_metadata_enabled=stop_trace_enabled,
             sequential_generation=official_navida_protocol,
+            update_policy=update_policy,
+            min_reward_std=min_reward_std,
+            min_reward_margin=min_reward_margin,
+            action_span_only=action_span_only,
+            max_updates_per_episode=max_updates_per_episode,
+            anchor_l2_weight=anchor_l2_weight,
+            max_adapter_delta_norm=max_adapter_delta_norm,
+            pairwise_beta=pairwise_beta,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -559,8 +583,12 @@ class NaVIDA_Agent(Agent):
             "episode_id": self.episode_id,
             "decision_step": self.decision_step,
             "loss": update_result["loss"],
+            "policy_loss": update_result["policy_loss"],
+            "policy_loss_type": update_result["policy_loss_type"],
+            "anchor_loss": update_result["anchor_loss"],
             "rewards": update_result["rewards"],
             "reward_std": update_result["reward_std"],
+            "reward_margin": update_result["reward_margin"],
             "valid_count": update_result["valid_count"],
             "adapter_norm_before": update_result["adapter_norm_before"],
             "adapter_norm_after": update_result["adapter_norm_after"],
@@ -568,6 +596,17 @@ class NaVIDA_Agent(Agent):
             "adapter_checksum_after": update_result["adapter_checksum_after"],
             "parameters_unchanged": update_result["parameters_unchanged"],
             "update_enabled": update_result["update_enabled"],
+            "update_eligible": update_result["update_eligible"],
+            "update_gate_reason": update_result["update_gate_reason"],
+            "optimizer_step_executed": update_result["optimizer_step_executed"],
+            "effective_parameter_change": update_result["effective_parameter_change"],
+            "update_rolled_back": update_result["update_rolled_back"],
+            "rollback_reason": update_result["rollback_reason"],
+            "episode_update_opportunities": update_result["episode_update_opportunities"],
+            "episode_optimizer_steps": update_result["episode_optimizer_steps"],
+            "adapter_delta_norm": update_result["adapter_delta_norm"],
+            "action_span_only": update_result["action_span_only"],
+            "action_spans_available": update_result["action_spans_available"],
             "timing": update_result["timing"],
         })
         self.decision_step += 1
@@ -639,6 +678,19 @@ def main():
                         help="write default-off atomic action provenance JSONL")
     parser.add_argument("--official-navida-protocol",action="store_true",
                         help="match official NaVIDA prompt inputs; requires history 200")
+    parser.add_argument("--update-policy",choices=("legacy", "gated"),default="legacy",
+                        help="legacy always steps; gated requires reliable consensus")
+    parser.add_argument("--min-reward-std",type=float,default=0.2)
+    parser.add_argument("--min-reward-margin",type=float,default=0.25)
+    parser.add_argument("--action-span-only",action="store_true",
+                        help="apply the policy loss only to parsed answer/action tokens")
+    parser.add_argument("--max-updates-per-episode",type=int,default=0,
+                        help="zero disables the gated per-episode update limit")
+    parser.add_argument("--anchor-l2-weight",type=float,default=0.0)
+    parser.add_argument("--max-adapter-delta-norm",type=float,default=0.0,
+                        help="zero disables rollback on excessive episode adapter drift")
+    parser.add_argument("--pairwise-beta",type=float,default=1.0,
+                        help="positive scale for gated best-vs-worst action-token loss")
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -653,6 +705,14 @@ def main():
         raise ValueError("episode-ids-file and max-episodes cannot be used together")
     if args.early_stop_rotation < 0 or args.early_stop_steps < 0:
         raise ValueError("early-stop limits must be non-negative")
+    if args.min_reward_std < 0 or args.min_reward_margin < 0:
+        raise ValueError("reward gate thresholds must be non-negative")
+    if args.max_updates_per_episode < 0:
+        raise ValueError("max-updates-per-episode must be non-negative")
+    if args.anchor_l2_weight < 0 or args.max_adapter_delta_norm < 0:
+        raise ValueError("adapter drift controls must be non-negative")
+    if args.pairwise_beta <= 0:
+        raise ValueError("pairwise-beta must be positive")
     if args.official_navida_protocol and args.max_action_history != 200:
         raise ValueError("official-navida-protocol requires --max-action-history 200")
     seed_all(args.seed)
@@ -726,6 +786,14 @@ def main():
             "max_grad_norm": args.max_grad_norm,
             "disable_update": args.disable_update,
             "stop_trace": args.stop_trace,
+            "update_policy": args.update_policy,
+            "min_reward_std": args.min_reward_std,
+            "min_reward_margin": args.min_reward_margin,
+            "action_span_only": args.action_span_only,
+            "max_updates_per_episode": args.max_updates_per_episode,
+            "anchor_l2_weight": args.anchor_l2_weight,
+            "max_adapter_delta_norm": args.max_adapter_delta_norm,
+            "pairwise_beta": args.pairwise_beta,
         },
     )
 
@@ -734,7 +802,9 @@ def main():
                 args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
                 args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
                 args.early_stop_steps, args.disable_update, args.stop_trace,
-                args.official_navida_protocol)
+                args.official_navida_protocol, args.update_policy, args.min_reward_std,
+                args.min_reward_margin, args.action_span_only, args.max_updates_per_episode,
+                args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta)
 
 if __name__ == "__main__":
     main()
