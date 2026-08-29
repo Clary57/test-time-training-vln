@@ -80,12 +80,14 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "max_adapter_delta_norm", "pairwise_beta",
             "reward_geometry", "orientation_distance_scale",
             "stop_distance_penalty", "candidate_sampling",
+            "cluster_quality_weight", "max_cluster_ratio",
+            "min_cluster_quality_margin",
         ):
             self.assertIn(f'"{field}"', self.source)
 
     def test_gated_update_controls_are_explicit_and_legacy_is_default(self):
         self.assertIn(
-            'parser.add_argument("--update-policy",choices=("legacy", "gated"),default="legacy"',
+            'parser.add_argument("--update-policy",choices=("legacy", "gated", "cluster_gated"),default="legacy"',
             self.source,
         )
         for option in (
@@ -94,6 +96,8 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "--max-adapter-delta-norm", "--pairwise-beta",
             "--reward-geometry", "--orientation-distance-scale",
             "--stop-distance-penalty", "--candidate-sampling",
+            "--cluster-quality-weight", "--max-cluster-ratio",
+            "--min-cluster-quality-margin",
         ):
             self.assertIn(option, self.source)
 

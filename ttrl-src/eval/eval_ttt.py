@@ -154,7 +154,9 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     pairwise_beta=1.0, reward_geometry="xy",
                     orientation_distance_scale=0.25 / math.radians(15.0),
                     stop_distance_penalty=0.25,
-                    candidate_sampling="all_stochastic") -> None:
+                    candidate_sampling="all_stochastic",
+                    cluster_quality_weight=0.25, max_cluster_ratio=0.5,
+                    min_cluster_quality_margin=0.0) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -194,7 +196,10 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         reward_geometry=reward_geometry,
                         orientation_distance_scale=orientation_distance_scale,
                         stop_distance_penalty=stop_distance_penalty,
-                        candidate_sampling=candidate_sampling)
+                        candidate_sampling=candidate_sampling,
+                        cluster_quality_weight=cluster_quality_weight,
+                        max_cluster_ratio=max_cluster_ratio,
+                        min_cluster_quality_margin=min_cluster_quality_margin)
 
     num_episodes = len(env.episodes)
     
@@ -296,7 +301,9 @@ class NaVIDA_Agent(Agent):
                     pairwise_beta=1.0, reward_geometry="xy",
                     orientation_distance_scale=0.25 / math.radians(15.0),
                     stop_distance_penalty=0.25,
-                    candidate_sampling="all_stochastic"):
+                    candidate_sampling="all_stochastic",
+                    cluster_quality_weight=0.25, max_cluster_ratio=0.5,
+                    min_cluster_quality_margin=0.0):
         
         print("Initialize NaVIDA")
         
@@ -360,6 +367,9 @@ class NaVIDA_Agent(Agent):
             orientation_distance_scale=orientation_distance_scale,
             stop_distance_penalty=stop_distance_penalty,
             candidate_sampling=candidate_sampling,
+            cluster_quality_weight=cluster_quality_weight,
+            max_cluster_ratio=max_cluster_ratio,
+            min_cluster_quality_margin=min_cluster_quality_margin,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -627,6 +637,13 @@ class NaVIDA_Agent(Agent):
             "stop_distance_penalty": update_result["stop_distance_penalty"],
             "candidate_sampling": update_result["candidate_sampling"],
             "candidate_sampling_modes": update_result["candidate_sampling_modes"],
+            "quality_scores": update_result["quality_scores"],
+            "combined_rewards": update_result["combined_rewards"],
+            "cluster_members": update_result["cluster_members"],
+            "cluster_outlier": update_result["cluster_outlier"],
+            "cluster_ratio": update_result["cluster_ratio"],
+            "cluster_quality_margin": update_result["cluster_quality_margin"],
+            "cluster_quality_weight": update_result["cluster_quality_weight"],
             "timing": update_result["timing"],
         })
         self.decision_step += 1
@@ -698,7 +715,7 @@ def main():
                         help="write default-off atomic action provenance JSONL")
     parser.add_argument("--official-navida-protocol",action="store_true",
                         help="match official NaVIDA prompt inputs; requires history 200")
-    parser.add_argument("--update-policy",choices=("legacy", "gated"),default="legacy",
+    parser.add_argument("--update-policy",choices=("legacy", "gated", "cluster_gated"),default="legacy",
                         help="legacy always steps; gated requires reliable consensus")
     parser.add_argument("--min-reward-std",type=float,default=0.2)
     parser.add_argument("--min-reward-margin",type=float,default=0.25)
@@ -722,6 +739,9 @@ def main():
                         choices=("all_stochastic", "greedy_plus_stochastic"),
                         default="all_stochastic",
                         help="candidate generation composition in stable order")
+    parser.add_argument("--cluster-quality-weight",type=float,default=0.25)
+    parser.add_argument("--max-cluster-ratio",type=float,default=0.5)
+    parser.add_argument("--min-cluster-quality-margin",type=float,default=0.0)
     args = parser.parse_args()
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
@@ -746,6 +766,10 @@ def main():
         raise ValueError("pairwise-beta must be positive")
     if args.orientation_distance_scale < 0 or args.stop_distance_penalty < 0:
         raise ValueError("trajectory distance scales must be non-negative")
+    if not 0 <= args.cluster_quality_weight <= 1:
+        raise ValueError("cluster-quality-weight must be in [0, 1]")
+    if not 0 <= args.max_cluster_ratio <= 1 or args.min_cluster_quality_margin < 0:
+        raise ValueError("cluster gate thresholds are invalid")
     if args.official_navida_protocol and args.max_action_history != 200:
         raise ValueError("official-navida-protocol requires --max-action-history 200")
     seed_all(args.seed)
@@ -831,6 +855,9 @@ def main():
             "orientation_distance_scale": args.orientation_distance_scale,
             "stop_distance_penalty": args.stop_distance_penalty,
             "candidate_sampling": args.candidate_sampling,
+            "cluster_quality_weight": args.cluster_quality_weight,
+            "max_cluster_ratio": args.max_cluster_ratio,
+            "min_cluster_quality_margin": args.min_cluster_quality_margin,
         },
     )
 
@@ -843,7 +870,9 @@ def main():
                 args.min_reward_margin, args.action_span_only, args.max_updates_per_episode,
                 args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta,
                 args.reward_geometry, args.orientation_distance_scale,
-                args.stop_distance_penalty, args.candidate_sampling)
+                args.stop_distance_penalty, args.candidate_sampling,
+                args.cluster_quality_weight, args.max_cluster_ratio,
+                args.min_cluster_quality_margin)
 
 if __name__ == "__main__":
     main()

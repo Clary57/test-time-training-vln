@@ -274,9 +274,63 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             {"candidate_sampling": "unknown"},
             {"orientation_distance_scale": -1.0},
             {"stop_distance_penalty": -1.0},
+            {"cluster_quality_weight": 1.1},
+            {"max_cluster_ratio": 1.1},
+            {"min_cluster_quality_margin": -0.1},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self._updater([3], {3: "forward 25 cm"}, **kwargs)
+
+    def test_cluster_gate_accepts_two_vs_one_when_quality_is_disabled(self):
+        model, updater = self._updater(
+            [3, 3, 4],
+            {3: "forward 25 cm", 4: "turn left 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            cluster_quality_weight=0.0,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("cluster-only")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertTrue(result["update_eligible"])
+        self.assertTrue(result["optimizer_step_executed"])
+        self.assertEqual(result["update_gate_reason"], "eligible_cluster")
+        self.assertEqual(result["cluster_members"], [0, 1])
+        self.assertEqual(result["cluster_outlier"], 2)
+        self.assertEqual(result["policy_loss_type"], "cluster_vs_outlier_action_logp")
+        self.assertEqual(result["selected_candidate_index"], 0)
+
+    def test_cluster_quality_can_veto_a_low_quality_majority(self):
+        _, updater = self._updater(
+            [3, 3, 4],
+            {3: "forward 25 cm", 4: "turn left 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            cluster_quality_weight=0.25,
+            min_cluster_quality_margin=0.0,
+        )
+        updater.reset_episode("cluster-quality-veto")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertFalse(result["update_eligible"])
+        self.assertFalse(result["optimizer_step_executed"])
+        self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
+        self.assertLess(result["cluster_quality_margin"], 0.0)
+
+    def test_cluster_reference_scoring_does_not_change_default_behavior(self):
+        outcomes = []
+        for policy in ("legacy", "gated"):
+            model, updater = self._updater(
+                [3, 3, 4],
+                {3: "forward 25 cm", 4: "turn left 15 degree"},
+                update_policy=policy,
+            )
+            updater.reset_episode("default-noninterference")
+            result = updater.adapt_step(self._inputs())
+            outcomes.append((result["candidate_actions"] if "candidate_actions" in result else None,
+                             result["selected_actions"], model.generate_calls))
+        self.assertEqual(outcomes[0][1:], outcomes[1][1:])
 
     def test_adapt_step_updates_only_lora_and_reset_restores_base_and_optimizer(self):
         model, updater = self._updater(
