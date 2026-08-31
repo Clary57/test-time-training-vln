@@ -1,6 +1,7 @@
 import ast
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 from peft import LoraConfig
@@ -71,7 +72,7 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
 
     def test_manifest_records_protocol_critical_parameters(self):
         for field in (
-            "official_navida_protocol", "max_action_history", "max_executed_chunks",
+            "official_navida_protocol", "ttrl_profile", "max_action_history", "max_executed_chunks",
             "sequential_candidate_generation",
             "num_generations", "temperature", "learning_rate", "weight_decay",
             "max_grad_norm", "disable_update", "stop_trace",
@@ -84,6 +85,42 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "min_cluster_quality_margin",
         ):
             self.assertIn(f'"{field}"', self.source)
+
+    def test_named_a5_profile_is_a4_plus_geometry_and_sampling_only(self):
+        profile_assignment = next(
+            node for node in self.tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "TTRL_PROFILES"
+                    for target in node.targets)
+        )
+        profile_function = next(
+            node for node in self.tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "apply_ttrl_profile"
+        )
+        namespace = {}
+        exec(
+            compile(
+                ast.Module(body=[profile_assignment, profile_function], type_ignores=[]),
+                str(EVALUATOR), "exec",
+            ),
+            namespace,
+        )
+        profiles = namespace["TTRL_PROFILES"]
+        differing_fields = {
+            name for name in profiles["a4"]
+            if profiles["a4"][name] != profiles["a5"][name]
+        }
+        self.assertEqual(differing_fields, {"reward_geometry", "candidate_sampling"})
+        self.assertEqual(profiles["a5"]["reward_geometry"], "se2_stop")
+        self.assertEqual(profiles["a5"]["candidate_sampling"], "greedy_plus_stochastic")
+
+        custom = SimpleNamespace(ttrl_profile="custom", update_policy="legacy")
+        self.assertIs(namespace["apply_ttrl_profile"](custom), custom)
+        self.assertEqual(custom.update_policy, "legacy")
+        a5 = SimpleNamespace(ttrl_profile="a5")
+        namespace["apply_ttrl_profile"](a5)
+        for name, value in profiles["a5"].items():
+            self.assertEqual(getattr(a5, name), value)
 
     def test_gated_update_controls_are_explicit_and_legacy_is_default(self):
         self.assertIn(

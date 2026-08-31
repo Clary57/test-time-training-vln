@@ -318,6 +318,37 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
         self.assertLess(result["cluster_quality_margin"], 0.0)
 
+    def test_a5_components_work_together_under_cluster_gate(self):
+        model, updater = self._updater(
+            [6, 6, 4],
+            {
+                4: "turn left 15 degree",
+                6: "turn right 15 degree",
+            },
+            update_policy="cluster_gated",
+            action_span_only=True,
+            max_updates_per_episode=5,
+            reward_geometry="se2_stop",
+            candidate_sampling="greedy_plus_stochastic",
+            cluster_quality_weight=0.25,
+            max_cluster_ratio=0.5,
+            min_cluster_quality_margin=0.0,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("a5-combined-components")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(
+            result["candidate_sampling_modes"], ["greedy", "stochastic", "stochastic"]
+        )
+        self.assertEqual(result["reward_geometry"], "se2_stop")
+        self.assertEqual(result["cluster_members"], [0, 1])
+        self.assertEqual(result["cluster_outlier"], 2)
+        self.assertTrue(result["update_eligible"])
+        self.assertTrue(result["optimizer_step_executed"])
+        self.assertEqual(result["selected_actions"], [3])
+        self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
+
     def test_cluster_reference_scoring_does_not_change_default_behavior(self):
         outcomes = []
         for policy in ("legacy", "gated"):

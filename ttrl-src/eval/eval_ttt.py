@@ -116,6 +116,39 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+TTRL_PROFILES = {
+    "a4": {
+        "update_policy": "cluster_gated",
+        "action_span_only": True,
+        "max_updates_per_episode": 5,
+        "reward_geometry": "xy",
+        "candidate_sampling": "all_stochastic",
+        "cluster_quality_weight": 0.25,
+        "max_cluster_ratio": 0.5,
+        "min_cluster_quality_margin": 0.0,
+    },
+    "a5": {
+        "update_policy": "cluster_gated",
+        "action_span_only": True,
+        "max_updates_per_episode": 5,
+        "reward_geometry": "se2_stop",
+        "candidate_sampling": "greedy_plus_stochastic",
+        "cluster_quality_weight": 0.25,
+        "max_cluster_ratio": 0.5,
+        "min_cluster_quality_margin": 0.0,
+    },
+}
+
+
+def apply_ttrl_profile(args):
+    """Expand a named experiment profile without changing legacy defaults."""
+    if args.ttrl_profile == "custom":
+        return args
+    for name, value in TTRL_PROFILES[args.ttrl_profile].items():
+        setattr(args, name, value)
+    return args
+
+
 def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
                            episode_ids_file_sha256=None, selection_seed=None,
                            dataset_split=None, protocol_parameters=None):
@@ -715,6 +748,8 @@ def main():
                         help="write default-off atomic action provenance JSONL")
     parser.add_argument("--official-navida-protocol",action="store_true",
                         help="match official NaVIDA prompt inputs; requires history 200")
+    parser.add_argument("--ttrl-profile",choices=("custom", "a4", "a5"),default="custom",
+                        help="named protocol preset; a5 adds se2/stop geometry and hybrid sampling to a4")
     parser.add_argument("--update-policy",choices=("legacy", "gated", "cluster_gated"),default="legacy",
                         help="legacy always steps; gated requires reliable consensus")
     parser.add_argument("--min-reward-std",type=float,default=0.2)
@@ -743,6 +778,7 @@ def main():
     parser.add_argument("--max-cluster-ratio",type=float,default=0.5)
     parser.add_argument("--min-cluster-quality-margin",type=float,default=0.0)
     args = parser.parse_args()
+    apply_ttrl_profile(args)
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
         raise ValueError("split-id must be in [0, split-num)")
@@ -829,6 +865,7 @@ def main():
         episode_ids_file_sha256, selection_seed, config.habitat.dataset.split,
         {
             "official_navida_protocol": args.official_navida_protocol,
+            "ttrl_profile": args.ttrl_profile,
             "sequential_candidate_generation": args.official_navida_protocol,
             "lora_injection": (
                 "native_transformers_adapter"
