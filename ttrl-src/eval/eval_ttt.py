@@ -5,6 +5,7 @@ from habitat import Env
 from habitat.core.agent import Agent
 from tqdm import trange
 import os, io
+import math
 import re
 import sys
 import torch
@@ -36,6 +37,39 @@ from trainer.trajectory_consensus_updater import TrajectoryConsensusUpdater
 from eval.stop_trace import StopTraceWriter, chunk_metadata, resolve_success_distance
 
 SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def navida_lora_config():
+    return LoraConfig(
+        r=8,
+        lora_alpha=8,
+        lora_dropout=0.05,
+        bias="none",
+        target_modules=[
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ],
+        exclude_modules=".*visual.*",
+    )
+
+
+def attach_trainable_lora(model, lora_path, *, native_adapter):
+    """Attach LoRA without changing the Qwen model type in official mode."""
+    if native_adapter:
+        original_type = type(model)
+        if lora_path:
+            model.load_adapter(lora_path, is_trainable=True)
+        else:
+            model.add_adapter(navida_lora_config())
+        if type(model) is not original_type:
+            raise RuntimeError("native LoRA injection unexpectedly changed the model type")
+        trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
+        if not trainable or any("lora_" not in name for name in trainable):
+            raise RuntimeError("native LoRA injection exposed non-LoRA trainable parameters")
+        return model
+    if lora_path:
+        return PeftModel.from_pretrained(model, lora_path, is_trainable=True)
+    return get_peft_model(model, navida_lora_config())
 
 
 def encode_image_base64(image):
@@ -82,9 +116,42 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
+TTRL_PROFILES = {
+    "a4": {
+        "update_policy": "cluster_gated",
+        "action_span_only": True,
+        "max_updates_per_episode": 5,
+        "reward_geometry": "xy",
+        "candidate_sampling": "all_stochastic",
+        "cluster_quality_weight": 0.25,
+        "max_cluster_ratio": 0.5,
+        "min_cluster_quality_margin": 0.0,
+    },
+    "a5": {
+        "update_policy": "cluster_gated",
+        "action_span_only": True,
+        "max_updates_per_episode": 5,
+        "reward_geometry": "se2_stop",
+        "candidate_sampling": "greedy_plus_stochastic",
+        "cluster_quality_weight": 0.25,
+        "max_cluster_ratio": 0.5,
+        "min_cluster_quality_margin": 0.0,
+    },
+}
+
+
+def apply_ttrl_profile(args):
+    """Expand a named experiment profile without changing legacy defaults."""
+    if args.ttrl_profile == "custom":
+        return args
+    for name, value in TTRL_PROFILES[args.ttrl_profile].items():
+        setattr(args, name, value)
+    return args
+
+
 def write_episode_manifest(result_path, split_num, split_id, episodes, expected_episode_ids,
                            episode_ids_file_sha256=None, selection_seed=None,
-                           dataset_split=None):
+                           dataset_split=None, protocol_parameters=None):
     """Persist this shard and the common expected ID set before resume filtering."""
     os.makedirs(result_path, exist_ok=True)
     manifest = {
@@ -96,6 +163,7 @@ def write_episode_manifest(result_path, split_num, split_id, episodes, expected_
         "episode_ids_file_sha256": episode_ids_file_sha256,
         "selection_seed": selection_seed,
         "dataset_split": dataset_split,
+        "protocol_parameters": protocol_parameters or {},
     }
     with open(os.path.join(result_path, "episode_manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
@@ -111,7 +179,17 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     forward_distance, turn_angle, max_action_history, resolution_ratio,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
                     max_episodes=None, early_stop_rotation=25, early_stop_steps=400,
-                    disable_update=False, stop_trace=False) -> None:
+                    disable_update=False, stop_trace=False,
+                    official_navida_protocol=False, update_policy="legacy",
+                    min_reward_std=0.2, min_reward_margin=0.25,
+                    action_span_only=False, max_updates_per_episode=0,
+                    anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
+                    pairwise_beta=1.0, reward_geometry="xy",
+                    orientation_distance_scale=0.25 / math.radians(15.0),
+                    stop_distance_penalty=0.25,
+                    candidate_sampling="all_stochastic",
+                    cluster_quality_weight=0.25, max_cluster_ratio=0.5,
+                    min_cluster_quality_margin=0.0) -> None:
     log_path = os.path.join(result_path, "log")
     os.makedirs(log_path, exist_ok=True)
     dataset.episodes = [
@@ -138,7 +216,23 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         temperature,
                         seed,
                         disable_update=disable_update,
-                        stop_trace_enabled=stop_trace)
+                        stop_trace_enabled=stop_trace,
+                        official_navida_protocol=official_navida_protocol,
+                        update_policy=update_policy,
+                        min_reward_std=min_reward_std,
+                        min_reward_margin=min_reward_margin,
+                        action_span_only=action_span_only,
+                        max_updates_per_episode=max_updates_per_episode,
+                        anchor_l2_weight=anchor_l2_weight,
+                        max_adapter_delta_norm=max_adapter_delta_norm,
+                        pairwise_beta=pairwise_beta,
+                        reward_geometry=reward_geometry,
+                        orientation_distance_scale=orientation_distance_scale,
+                        stop_distance_penalty=stop_distance_penalty,
+                        candidate_sampling=candidate_sampling,
+                        cluster_quality_weight=cluster_quality_weight,
+                        max_cluster_ratio=max_cluster_ratio,
+                        min_cluster_quality_margin=min_cluster_quality_margin)
 
     num_episodes = len(env.episodes)
     
@@ -232,7 +326,17 @@ class NaVIDA_Agent(Agent):
     def __init__(self, model_path, lora_path, result_path, forward_distance,
                     turn_angle, max_action_history, resolution_ratio, num_generations,
                     learning_rate, weight_decay, max_grad_norm, temperature, seed,
-                    require_map=True, disable_update=False, stop_trace_enabled=False):
+                    require_map=True, disable_update=False, stop_trace_enabled=False,
+                    official_navida_protocol=False, update_policy="legacy",
+                    min_reward_std=0.2, min_reward_margin=0.25,
+                    action_span_only=False, max_updates_per_episode=0,
+                    anchor_l2_weight=0.0, max_adapter_delta_norm=0.0,
+                    pairwise_beta=1.0, reward_geometry="xy",
+                    orientation_distance_scale=0.25 / math.radians(15.0),
+                    stop_distance_penalty=0.25,
+                    candidate_sampling="all_stochastic",
+                    cluster_quality_weight=0.25, max_cluster_ratio=0.5,
+                    min_cluster_quality_margin=0.0):
         
         print("Initialize NaVIDA")
         
@@ -245,6 +349,7 @@ class NaVIDA_Agent(Agent):
         self.num_generations = num_generations
         self.seed = seed
         self.stop_trace_enabled = stop_trace_enabled
+        self.official_navida_protocol = official_navida_protocol
         os.makedirs(self.result_path, exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "log"), exist_ok=True)
         os.makedirs(os.path.join(self.result_path, "video"), exist_ok=True)
@@ -256,25 +361,15 @@ class NaVIDA_Agent(Agent):
 
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_path, **model_init_kwargs)
 
-        if lora_path is not None and lora_path != '':
+        if lora_path:
             print('Loading trainable LoRA weights...')
-            self.model = PeftModel.from_pretrained(self.model, lora_path, is_trainable=True)
         else:
             print('Creating a new trainable LoRA adapter...')
-            self.model = get_peft_model(
-                self.model,
-                LoraConfig(
-                    r=8,
-                    lora_alpha=8,
-                    lora_dropout=0.05,
-                    bias="none",
-                    target_modules=[
-                        "q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj",
-                    ],
-                    exclude_modules=".*visual.*",
-                ),
-            )
+        self.model = attach_trainable_lora(
+            self.model,
+            lora_path,
+            native_adapter=official_navida_protocol,
+        )
 
         self.device = 'cuda'
         self.model.to(self.device)
@@ -292,6 +387,22 @@ class NaVIDA_Agent(Agent):
             seed=seed,
             disable_update=disable_update,
             trace_metadata_enabled=stop_trace_enabled,
+            sequential_generation=official_navida_protocol,
+            update_policy=update_policy,
+            min_reward_std=min_reward_std,
+            min_reward_margin=min_reward_margin,
+            action_span_only=action_span_only,
+            max_updates_per_episode=max_updates_per_episode,
+            anchor_l2_weight=anchor_l2_weight,
+            max_adapter_delta_norm=max_adapter_delta_norm,
+            pairwise_beta=pairwise_beta,
+            reward_geometry=reward_geometry,
+            orientation_distance_scale=orientation_distance_scale,
+            stop_distance_penalty=stop_distance_penalty,
+            candidate_sampling=candidate_sampling,
+            cluster_quality_weight=cluster_quality_weight,
+            max_cluster_ratio=max_cluster_ratio,
+            min_cluster_quality_margin=min_cluster_quality_margin,
             forward_distance=forward_distance,
             turn_angle=turn_angle,
         )
@@ -530,8 +641,12 @@ class NaVIDA_Agent(Agent):
             "episode_id": self.episode_id,
             "decision_step": self.decision_step,
             "loss": update_result["loss"],
+            "policy_loss": update_result["policy_loss"],
+            "policy_loss_type": update_result["policy_loss_type"],
+            "anchor_loss": update_result["anchor_loss"],
             "rewards": update_result["rewards"],
             "reward_std": update_result["reward_std"],
+            "reward_margin": update_result["reward_margin"],
             "valid_count": update_result["valid_count"],
             "adapter_norm_before": update_result["adapter_norm_before"],
             "adapter_norm_after": update_result["adapter_norm_after"],
@@ -539,6 +654,29 @@ class NaVIDA_Agent(Agent):
             "adapter_checksum_after": update_result["adapter_checksum_after"],
             "parameters_unchanged": update_result["parameters_unchanged"],
             "update_enabled": update_result["update_enabled"],
+            "update_eligible": update_result["update_eligible"],
+            "update_gate_reason": update_result["update_gate_reason"],
+            "optimizer_step_executed": update_result["optimizer_step_executed"],
+            "effective_parameter_change": update_result["effective_parameter_change"],
+            "update_rolled_back": update_result["update_rolled_back"],
+            "rollback_reason": update_result["rollback_reason"],
+            "episode_update_opportunities": update_result["episode_update_opportunities"],
+            "episode_optimizer_steps": update_result["episode_optimizer_steps"],
+            "adapter_delta_norm": update_result["adapter_delta_norm"],
+            "action_span_only": update_result["action_span_only"],
+            "action_spans_available": update_result["action_spans_available"],
+            "reward_geometry": update_result["reward_geometry"],
+            "orientation_distance_scale": update_result["orientation_distance_scale"],
+            "stop_distance_penalty": update_result["stop_distance_penalty"],
+            "candidate_sampling": update_result["candidate_sampling"],
+            "candidate_sampling_modes": update_result["candidate_sampling_modes"],
+            "quality_scores": update_result["quality_scores"],
+            "combined_rewards": update_result["combined_rewards"],
+            "cluster_members": update_result["cluster_members"],
+            "cluster_outlier": update_result["cluster_outlier"],
+            "cluster_ratio": update_result["cluster_ratio"],
+            "cluster_quality_margin": update_result["cluster_quality_margin"],
+            "cluster_quality_weight": update_result["cluster_quality_weight"],
             "timing": update_result["timing"],
         })
         self.decision_step += 1
@@ -608,7 +746,39 @@ def main():
                         help="run full adaptation compute but skip optimizer.step")
     parser.add_argument("--stop-trace",action="store_true",
                         help="write default-off atomic action provenance JSONL")
+    parser.add_argument("--official-navida-protocol",action="store_true",
+                        help="match official NaVIDA prompt inputs; requires history 200")
+    parser.add_argument("--ttrl-profile",choices=("custom", "a4", "a5"),default="custom",
+                        help="named protocol preset; a5 adds se2/stop geometry and hybrid sampling to a4")
+    parser.add_argument("--update-policy",choices=("legacy", "gated", "cluster_gated"),default="legacy",
+                        help="legacy always steps; gated requires reliable consensus")
+    parser.add_argument("--min-reward-std",type=float,default=0.2)
+    parser.add_argument("--min-reward-margin",type=float,default=0.25)
+    parser.add_argument("--action-span-only",action="store_true",
+                        help="apply the policy loss only to parsed answer/action tokens")
+    parser.add_argument("--max-updates-per-episode",type=int,default=0,
+                        help="zero disables the gated per-episode update limit")
+    parser.add_argument("--anchor-l2-weight",type=float,default=0.0)
+    parser.add_argument("--max-adapter-delta-norm",type=float,default=0.0,
+                        help="zero disables rollback on excessive episode adapter drift")
+    parser.add_argument("--pairwise-beta",type=float,default=1.0,
+                        help="positive scale for gated best-vs-worst action-token loss")
+    parser.add_argument("--reward-geometry",choices=("xy", "se2_stop"),default="xy",
+                        help="legacy XY or orientation/stop-aware trajectory consensus")
+    parser.add_argument("--orientation-distance-scale",type=float,
+                        default=0.25 / math.radians(15.0),
+                        help="meters per radian in se2_stop trajectory distance")
+    parser.add_argument("--stop-distance-penalty",type=float,default=0.25,
+                        help="meters assigned to a stop-state mismatch")
+    parser.add_argument("--candidate-sampling",
+                        choices=("all_stochastic", "greedy_plus_stochastic"),
+                        default="all_stochastic",
+                        help="candidate generation composition in stable order")
+    parser.add_argument("--cluster-quality-weight",type=float,default=0.25)
+    parser.add_argument("--max-cluster-ratio",type=float,default=0.5)
+    parser.add_argument("--min-cluster-quality-margin",type=float,default=0.0)
     args = parser.parse_args()
+    apply_ttrl_profile(args)
 
     if args.split_num < 1 or not 0 <= args.split_id < args.split_num:
         raise ValueError("split-id must be in [0, split-num)")
@@ -622,6 +792,22 @@ def main():
         raise ValueError("episode-ids-file and max-episodes cannot be used together")
     if args.early_stop_rotation < 0 or args.early_stop_steps < 0:
         raise ValueError("early-stop limits must be non-negative")
+    if args.min_reward_std < 0 or args.min_reward_margin < 0:
+        raise ValueError("reward gate thresholds must be non-negative")
+    if args.max_updates_per_episode < 0:
+        raise ValueError("max-updates-per-episode must be non-negative")
+    if args.anchor_l2_weight < 0 or args.max_adapter_delta_norm < 0:
+        raise ValueError("adapter drift controls must be non-negative")
+    if args.pairwise_beta <= 0:
+        raise ValueError("pairwise-beta must be positive")
+    if args.orientation_distance_scale < 0 or args.stop_distance_penalty < 0:
+        raise ValueError("trajectory distance scales must be non-negative")
+    if not 0 <= args.cluster_quality_weight <= 1:
+        raise ValueError("cluster-quality-weight must be in [0, 1]")
+    if not 0 <= args.max_cluster_ratio <= 1 or args.min_cluster_quality_margin < 0:
+        raise ValueError("cluster gate thresholds are invalid")
+    if args.official_navida_protocol and args.max_action_history != 200:
+        raise ValueError("official-navida-protocol requires --max-action-history 200")
     seed_all(args.seed)
 
     config = get_config(args.exp_config)
@@ -676,14 +862,54 @@ def main():
         dataset.episodes = all_episodes[args.split_id::args.split_num][:args.max_episodes]
     write_episode_manifest(
         args.result_path, args.split_num, args.split_id, dataset.episodes, expected_episode_ids,
-        episode_ids_file_sha256, selection_seed, config.habitat.dataset.split
+        episode_ids_file_sha256, selection_seed, config.habitat.dataset.split,
+        {
+            "official_navida_protocol": args.official_navida_protocol,
+            "ttrl_profile": args.ttrl_profile,
+            "sequential_candidate_generation": args.official_navida_protocol,
+            "lora_injection": (
+                "native_transformers_adapter"
+                if args.official_navida_protocol else "peft_model_wrapper"
+            ),
+            "max_action_history": args.max_action_history,
+            "max_executed_chunks": 2,
+            "num_generations": args.num_generations,
+            "temperature": args.temperature,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "max_grad_norm": args.max_grad_norm,
+            "disable_update": args.disable_update,
+            "stop_trace": args.stop_trace,
+            "update_policy": args.update_policy,
+            "min_reward_std": args.min_reward_std,
+            "min_reward_margin": args.min_reward_margin,
+            "action_span_only": args.action_span_only,
+            "max_updates_per_episode": args.max_updates_per_episode,
+            "anchor_l2_weight": args.anchor_l2_weight,
+            "max_adapter_delta_norm": args.max_adapter_delta_norm,
+            "pairwise_beta": args.pairwise_beta,
+            "reward_geometry": args.reward_geometry,
+            "orientation_distance_scale": args.orientation_distance_scale,
+            "stop_distance_penalty": args.stop_distance_penalty,
+            "candidate_sampling": args.candidate_sampling,
+            "cluster_quality_weight": args.cluster_quality_weight,
+            "max_cluster_ratio": args.max_cluster_ratio,
+            "min_cluster_quality_margin": args.min_cluster_quality_margin,
+        },
     )
 
     evaluate_agent(config, args.split_id, dataset, args.model_path, args.lora_path, args.result_path,
                 args.num_generations, args.forward_distance, args.turn_angle, args.max_action_history,
                 args.resolution_ratio, args.learning_rate, args.weight_decay, args.max_grad_norm,
                 args.temperature, args.seed, args.max_episodes, args.early_stop_rotation,
-                args.early_stop_steps, args.disable_update, args.stop_trace)
+                args.early_stop_steps, args.disable_update, args.stop_trace,
+                args.official_navida_protocol, args.update_policy, args.min_reward_std,
+                args.min_reward_margin, args.action_span_only, args.max_updates_per_episode,
+                args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta,
+                args.reward_geometry, args.orientation_distance_scale,
+                args.stop_distance_penalty, args.candidate_sampling,
+                args.cluster_quality_weight, args.max_cluster_ratio,
+                args.min_cluster_quality_margin)
 
 if __name__ == "__main__":
     main()

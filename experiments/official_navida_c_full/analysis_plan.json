@@ -1,0 +1,9 @@
+{
+  "analysis_type": "canonical frozen NaVIDA full-split validation",
+  "dataset": "R2R VLN-CE val_unseen",
+  "episode_count": 1839,
+  "primary_endpoint": "success",
+  "reported_metrics": ["success", "oracle_success", "spl", "distance_to_goal", "path_length"],
+  "reference": {"published_sr": 0.614, "scope": "full val_unseen"},
+  "interpretation": "baseline fidelity validation; no TTRL adaptation"
+}

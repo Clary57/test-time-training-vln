@@ -1,0 +1,31 @@
+{
+  "title": "Official NaVIDA frozen evaluator on locked confirmatory128",
+  "scope": "diagnostic baseline-fidelity replication",
+  "primary_output": "Success rate on the locked 128-episode set",
+  "comparisons": [
+    "new official-evaluator C128 versus historical project-evaluator C128",
+    "descriptive comparison with the published full-val-unseen result"
+  ],
+  "limitations": [
+    "The 128 episodes are not the complete 1839-episode val_unseen split.",
+    "The published 61.4% result is not a paired 128-episode estimate.",
+    "A result difference cannot by itself identify which evaluator detail caused it."
+  ],
+  "locked_protocol": {
+    "official_commit": "b86316a78a2865c80b445ed5a8fcc08fc0243dfb",
+    "official_evaluator_sha256": "790ecf3911acaf35b422ef93c18c7a7ffacd55712f5292a60b5cbb53790ca39a",
+    "selection_sha256": "e3d3c050d471ca86a253ca8238cd662a6208e72c10ed0bdb2248390329becfb6",
+    "dataset": "R2R VLN-CE val_unseen",
+    "max_action_history": 200,
+    "executed_action_chunks": 2,
+    "num_generations": 1,
+    "temperature": 0.2,
+    "top_p": 1.0,
+    "max_new_tokens": 512,
+    "repetition_penalty": 1.05,
+    "lora": null,
+    "adaptation": false,
+    "split_num": 8,
+    "worker_topology": "eight evaluator shard processes run serially on one physical GPU; official process and seed boundaries are preserved while concurrency is removed"
+  }
+}

@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import re
 import time
 from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from fastdtw import fastdtw
 from transformers import GenerationConfig
 
@@ -36,6 +38,22 @@ class TrajectoryConsensusUpdater:
         seed: int,
         disable_update: bool = False,
         trace_metadata_enabled: bool = False,
+        sequential_generation: bool = False,
+        update_policy: str = "legacy",
+        min_reward_std: float = 0.2,
+        min_reward_margin: float = 0.25,
+        action_span_only: bool = False,
+        max_updates_per_episode: int = 0,
+        anchor_l2_weight: float = 0.0,
+        max_adapter_delta_norm: float = 0.0,
+        pairwise_beta: float = 1.0,
+        reward_geometry: str = "xy",
+        orientation_distance_scale: float = 0.25 / math.radians(15.0),
+        stop_distance_penalty: float = 0.25,
+        candidate_sampling: str = "all_stochastic",
+        cluster_quality_weight: float = 0.25,
+        max_cluster_ratio: float = 0.5,
+        min_cluster_quality_margin: float = 0.0,
         forward_distance: float = 25.0,
         turn_angle: float = 15.0,
     ) -> None:
@@ -50,6 +68,44 @@ class TrajectoryConsensusUpdater:
         self.seed = seed
         self.disable_update = disable_update
         self.trace_metadata_enabled = trace_metadata_enabled
+        self.sequential_generation = sequential_generation
+        if update_policy not in {"legacy", "gated", "cluster_gated"}:
+            raise ValueError("update_policy must be 'legacy', 'gated', or 'cluster_gated'")
+        if min_reward_std < 0 or min_reward_margin < 0:
+            raise ValueError("reward gate thresholds must be non-negative")
+        if max_updates_per_episode < 0:
+            raise ValueError("max_updates_per_episode must be non-negative")
+        if anchor_l2_weight < 0 or max_adapter_delta_norm < 0:
+            raise ValueError("adapter drift controls must be non-negative")
+        if pairwise_beta <= 0:
+            raise ValueError("pairwise_beta must be positive")
+        if reward_geometry not in {"xy", "se2_stop"}:
+            raise ValueError("reward_geometry must be 'xy' or 'se2_stop'")
+        if orientation_distance_scale < 0 or stop_distance_penalty < 0:
+            raise ValueError("trajectory distance scales must be non-negative")
+        if candidate_sampling not in {"all_stochastic", "greedy_plus_stochastic"}:
+            raise ValueError(
+                "candidate_sampling must be 'all_stochastic' or 'greedy_plus_stochastic'"
+            )
+        if not 0 <= cluster_quality_weight <= 1:
+            raise ValueError("cluster_quality_weight must be in [0, 1]")
+        if not 0 <= max_cluster_ratio <= 1 or min_cluster_quality_margin < 0:
+            raise ValueError("cluster gate thresholds are invalid")
+        self.update_policy = update_policy
+        self.min_reward_std = min_reward_std
+        self.min_reward_margin = min_reward_margin
+        self.action_span_only = action_span_only
+        self.max_updates_per_episode = max_updates_per_episode
+        self.anchor_l2_weight = anchor_l2_weight
+        self.max_adapter_delta_norm = max_adapter_delta_norm
+        self.pairwise_beta = pairwise_beta
+        self.reward_geometry = reward_geometry
+        self.orientation_distance_scale = orientation_distance_scale
+        self.stop_distance_penalty = stop_distance_penalty
+        self.candidate_sampling = candidate_sampling
+        self.cluster_quality_weight = cluster_quality_weight
+        self.max_cluster_ratio = max_cluster_ratio
+        self.min_cluster_quality_margin = min_cluster_quality_margin
         self.forward_distance = forward_distance
         self.turn_angle = turn_angle
         self.episode_id: str | None = None
@@ -63,7 +119,6 @@ class TrajectoryConsensusUpdater:
             repetition_penalty=1.05,
             num_return_sequences=num_generations,
         )
-
         self.trainable_parameters = [
             (name, parameter)
             for name, parameter in self.model.named_parameters()
@@ -76,6 +131,32 @@ class TrajectoryConsensusUpdater:
             for name, parameter in self.trainable_parameters
         }
         self.optimizer = self._new_optimizer()
+        self.update_opportunity_count = 0
+        self.optimizer_step_count = 0
+
+    def _candidate_generation_configs(self) -> List[GenerationConfig]:
+        """Return generation configs in stable candidate order."""
+        if self.candidate_sampling == "all_stochastic":
+            if not self.sequential_generation:
+                return [self.generation_config]
+            configs = []
+            for _ in range(self.num_generations):
+                config = GenerationConfig.from_dict(self.generation_config.to_dict())
+                config.num_return_sequences = 1
+                configs.append(config)
+            return configs
+
+        greedy = GenerationConfig.from_dict(self.generation_config.to_dict())
+        greedy.do_sample = False
+        greedy.num_return_sequences = 1
+        if self.num_generations == 1:
+            return [greedy]
+        stochastic = []
+        for _ in range(self.num_generations - 1):
+            config = GenerationConfig.from_dict(self.generation_config.to_dict())
+            config.num_return_sequences = 1
+            stochastic.append(config)
+        return [greedy, *stochastic]
 
     def _new_optimizer(self) -> torch.optim.Optimizer:
         return torch.optim.AdamW(
@@ -103,6 +184,8 @@ class TrajectoryConsensusUpdater:
             for name, parameter in self.trainable_parameters:
                 parameter.copy_(self.base_adapter_state[name].to(parameter.device, parameter.dtype))
         self.optimizer = self._new_optimizer()
+        self.update_opportunity_count = 0
+        self.optimizer_step_count = 0
 
     def adapter_norm(self) -> float:
         with torch.no_grad():
@@ -122,6 +205,209 @@ class TrajectoryConsensusUpdater:
             digest.update(str(tuple(tensor.shape)).encode("ascii"))
             digest.update(tensor.reshape(-1).view(torch.uint8).cpu().numpy().tobytes())
         return digest.hexdigest()
+
+    def adapter_delta_norm(self) -> float:
+        """Return the L2 distance from the episode's initial adapter."""
+        with torch.no_grad():
+            squared_norm = sum(
+                (parameter.detach().float() - self.base_adapter_state[name].to(
+                    parameter.device, torch.float32
+                )).pow(2).sum()
+                for name, parameter in self.trainable_parameters
+            )
+            return float(squared_norm.sqrt().item())
+
+    def _anchor_l2_loss(self) -> torch.Tensor:
+        squared_sum = None
+        element_count = 0
+        for name, parameter in self.trainable_parameters:
+            difference = parameter.float() - self.base_adapter_state[name].to(
+                parameter.device, torch.float32
+            )
+            term = difference.pow(2).sum()
+            squared_sum = term if squared_sum is None else squared_sum + term
+            element_count += parameter.numel()
+        return squared_sum / max(1, element_count)
+
+    @staticmethod
+    def _find_subsequence(sequence: Sequence[int], subsequence: Sequence[int]) -> int | None:
+        if not subsequence or len(subsequence) > len(sequence):
+            return None
+        for start in range(len(sequence) - len(subsequence) + 1):
+            if list(sequence[start:start + len(subsequence)]) == list(subsequence):
+                return start
+        return None
+
+    def _action_span_mask(
+        self,
+        completion_ids: torch.Tensor,
+        completion_mask: torch.Tensor,
+        completion: str,
+    ) -> Tuple[torch.Tensor, bool]:
+        """Mask only answer/action tokens without changing generated token IDs.
+
+        Plain action-only generations already consist entirely of action tokens.
+        Tagged completions must expose an exact tokenized answer subsequence; if
+        they do not, gated mode skips the update rather than training unrelated
+        explanation or formatting tokens.
+        """
+        answer_match = re.search(r"<answer>(.*?)</answer>", completion, flags=re.DOTALL)
+        if answer_match is None:
+            # Current NaVIDA generations are plain action strings.  In that
+            # case the whole textual completion is the action span, but EOS is
+            # a sequence-control token rather than part of the navigation action.
+            mask = completion_mask.clone()
+            mask[completion_ids == self.processor.tokenizer.eos_token_id] = 0
+            return mask, bool(mask.sum().item())
+        answer = answer_match.group(1).strip()
+        if not answer:
+            return torch.zeros_like(completion_mask), False
+        token_ids = completion_ids.detach().cpu().tolist()
+        valid_length = int(completion_mask.sum().item())
+        token_ids = token_ids[:valid_length]
+        for candidate_text in (answer, f" {answer}"):
+            encoded = self.processor.tokenizer.encode(
+                candidate_text, add_special_tokens=False
+            )
+            start = self._find_subsequence(token_ids, encoded)
+            if start is None:
+                continue
+            mask = torch.zeros_like(completion_mask)
+            mask[start:start + len(encoded)] = 1
+            return mask, True
+        return torch.zeros_like(completion_mask), False
+
+    def _action_span_masks(
+        self,
+        completion_id_batches: Sequence[torch.Tensor],
+        completion_masks: Sequence[torch.Tensor],
+        completions: Sequence[str],
+    ) -> Tuple[List[torch.Tensor], List[bool]]:
+        masks: List[torch.Tensor] = []
+        available: List[bool] = []
+        completion_index = 0
+        for ids_batch, mask_batch in zip(completion_id_batches, completion_masks):
+            batch_masks = []
+            for ids, base_mask in zip(ids_batch, mask_batch):
+                span_mask, found = self._action_span_mask(
+                    ids, base_mask, completions[completion_index]
+                )
+                batch_masks.append(span_mask)
+                available.append(found)
+                completion_index += 1
+            masks.append(torch.stack(batch_masks))
+        return masks, available
+
+    def _update_gate(
+        self,
+        rewards: Sequence[float],
+        valid: Sequence[bool],
+        action_spans_available: Sequence[bool],
+    ) -> Tuple[bool, str, float, float]:
+        valid_rewards = [float(reward) for reward, is_valid in zip(rewards, valid) if is_valid]
+        reward_std = float(np.std(valid_rewards)) if valid_rewards else 0.0
+        sorted_rewards = sorted(valid_rewards, reverse=True)
+        reward_margin = (
+            sorted_rewards[0] - sorted_rewards[1] if len(sorted_rewards) >= 2 else 0.0
+        )
+        if self.update_policy == "legacy":
+            return True, "legacy_policy", reward_std, reward_margin
+        if len(valid_rewards) != self.num_generations:
+            return False, "not_all_candidates_valid", reward_std, reward_margin
+        if reward_std < self.min_reward_std:
+            return False, "reward_std_below_threshold", reward_std, reward_margin
+        best_count = sum(abs(reward - sorted_rewards[0]) < 1e-8 for reward in valid_rewards)
+        if best_count != 1:
+            return False, "best_candidate_not_unique", reward_std, reward_margin
+        if reward_margin < self.min_reward_margin:
+            return False, "reward_margin_below_threshold", reward_std, reward_margin
+        if self.action_span_only and not all(action_spans_available):
+            return False, "action_span_unavailable", reward_std, reward_margin
+        if (
+            self.max_updates_per_episode > 0
+            and self.update_opportunity_count >= self.max_updates_per_episode
+        ):
+            return False, "episode_update_limit_reached", reward_std, reward_margin
+        return True, "eligible", reward_std, reward_margin
+
+    def _parameter_snapshot(self) -> List[torch.Tensor]:
+        return [parameter.detach().cpu().clone() for _, parameter in self.trainable_parameters]
+
+    def _restore_parameter_snapshot(self, snapshot: Sequence[torch.Tensor]) -> None:
+        with torch.no_grad():
+            for (_, parameter), before in zip(self.trainable_parameters, snapshot):
+                parameter.copy_(before.to(parameter.device, parameter.dtype))
+
+    @staticmethod
+    def _normalized_scores(values: Sequence[float]) -> List[float]:
+        values_array = np.asarray(values, dtype=np.float32)
+        if len(values_array) == 0 or np.ptp(values_array) < 1e-6:
+            return [0.0] * len(values_array)
+        normalized = 2.0 * (values_array - values_array.min()) / np.ptp(values_array) - 1.0
+        return [float(value) for value in normalized]
+
+    @staticmethod
+    def _behavior_penalty(actions: Sequence[int]) -> float:
+        reversals = sum(
+            {first, second} == {2, 3}
+            for first, second in zip(actions, actions[1:])
+        )
+        return min(1.0, 0.5 * reversals)
+
+    def _cluster_gate(
+        self,
+        actions: Sequence[List[int]],
+        valid: Sequence[bool],
+        action_spans_available: Sequence[bool],
+        quality_scores: Sequence[float],
+    ) -> Tuple[bool, str, List[int], int | None, float | None, float | None]:
+        if len(actions) != 3 or not all(valid):
+            return False, "cluster_requires_three_valid_candidates", [], None, None, None
+        distances = self._trajectory_distance_matrix(actions)
+        pairs = [(distances[i, j], i, j) for i in range(3) for j in range(i + 1, 3)]
+        cohesion, first, second = min(pairs, key=lambda item: (item[0], item[1], item[2]))
+        outlier = next(index for index in range(3) if index not in {first, second})
+        separation = float((distances[first, outlier] + distances[second, outlier]) / 2.0)
+        ratio = float(cohesion / max(separation, 1e-8))
+        if separation < 1e-6:
+            return False, "cluster_not_separated", [first, second], outlier, ratio, 0.0
+        if ratio > self.max_cluster_ratio:
+            return False, "cluster_ratio_above_threshold", [first, second], outlier, ratio, None
+        quality_margin = float(
+            np.mean([quality_scores[first], quality_scores[second]]) - quality_scores[outlier]
+        )
+        if (
+            self.cluster_quality_weight > 0
+            and quality_margin < self.min_cluster_quality_margin
+        ):
+            return False, "cluster_quality_below_outlier", [first, second], outlier, ratio, quality_margin
+        if self.action_span_only and not all(action_spans_available):
+            return False, "action_span_unavailable", [first, second], outlier, ratio, quality_margin
+        if (
+            self.max_updates_per_episode > 0
+            and self.update_opportunity_count >= self.max_updates_per_episode
+        ):
+            return False, "episode_update_limit_reached", [first, second], outlier, ratio, quality_margin
+        return True, "eligible_cluster", [first, second], outlier, ratio, quality_margin
+
+    @classmethod
+    def _clone_optimizer_value_to_cpu(cls, value: Any) -> Any:
+        if torch.is_tensor(value):
+            return value.detach().cpu().clone()
+        if isinstance(value, dict):
+            return {key: cls._clone_optimizer_value_to_cpu(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._clone_optimizer_value_to_cpu(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._clone_optimizer_value_to_cpu(item) for item in value)
+        return value
+
+    def _optimizer_snapshot(self) -> Dict[str, Any]:
+        return self._clone_optimizer_value_to_cpu(self.optimizer.state_dict())
+
+    def _restore_optimizer_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        self.optimizer = self._new_optimizer()
+        self.optimizer.load_state_dict(snapshot)
 
     def _completion_mask(self, completion_ids: torch.Tensor) -> torch.Tensor:
         eos_token_id = self.processor.tokenizer.eos_token_id
@@ -166,6 +452,53 @@ class TrajectoryConsensusUpdater:
             )
         return torch.stack(token_logps)
 
+    def _candidate_logps_batches(
+        self,
+        prompt_inputs: Dict[str, torch.Tensor],
+        prompt_completion_batches: Sequence[torch.Tensor],
+        completion_masks: Sequence[torch.Tensor],
+        prompt_length: int,
+        separate_candidate_batches: bool,
+    ) -> List[torch.Tensor]:
+        if separate_candidate_batches:
+            batches = []
+            for prompt_completion_ids, completion_mask in zip(
+                prompt_completion_batches, completion_masks
+            ):
+                prompt_mask = prompt_inputs["attention_mask"]
+                attention_mask = torch.cat(
+                    [prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1
+                )
+                batches.append(self._per_token_logps(
+                    self.model,
+                    prompt_completion_ids,
+                    attention_mask,
+                    prompt_inputs["pixel_values"],
+                    prompt_inputs["image_grid_thw"],
+                )[:, prompt_length - 1 :])
+            return batches
+        completion_mask = completion_masks[0]
+        prompt_mask = prompt_inputs["attention_mask"].repeat_interleave(
+            self.num_generations, dim=0
+        )
+        attention_mask = torch.cat([prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1)
+        return [self._per_token_logps(
+            self.model,
+            prompt_completion_batches[0],
+            attention_mask,
+            self._repeat_pixel_values(prompt_inputs["pixel_values"], self.num_generations),
+            prompt_inputs["image_grid_thw"].repeat_interleave(self.num_generations, dim=0),
+        )[:, prompt_length - 1 :]]
+
+    @staticmethod
+    def _candidate_mean_logps(
+        logp_batches: Sequence[torch.Tensor], masks: Sequence[torch.Tensor]
+    ) -> torch.Tensor:
+        means = []
+        for logps, mask in zip(logp_batches, masks):
+            means.extend((logps * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1))
+        return torch.stack(means)
+
     def adapt_step(self, prompt_inputs: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Generate candidates, update LoRA once, and return the pre-update medoid."""
         if prompt_inputs["input_ids"].size(0) != 1:
@@ -184,42 +517,99 @@ class TrajectoryConsensusUpdater:
         generation_start = time.perf_counter()
         self.model.eval()
         with torch.inference_mode():
-            generated_ids = self.model.generate(
-                **prompt_inputs,
-                generation_config=self.generation_config,
-                use_model_defaults=True,
-            )
+            candidate_generation_configs = self._candidate_generation_configs()
+            generated_batches = [self.model.generate(
+                    **prompt_inputs,
+                    generation_config=generation_config,
+                    use_model_defaults=True,
+                ) for generation_config in candidate_generation_configs]
+        separate_candidate_batches = len(generated_batches) > 1
         # Tensors created in inference_mode cannot be saved by the subsequent
         # autograd graph.  Clone outside the context before teacher-forcing the
         # sampled tokens through the trainable LoRA model.
-        prompt_completion_ids = generated_ids.clone()
+        prompt_completion_batches = [batch.clone() for batch in generated_batches]
         timing["generation"] = time.perf_counter() - generation_start
 
         prompt_length = prompt_inputs["input_ids"].size(1)
-        completion_ids = prompt_completion_ids[:, prompt_length:]
-        completion_mask = self._completion_mask(completion_ids)
-        completions = self.processor.batch_decode(completion_ids, skip_special_tokens=True)
+        completion_id_batches = [batch[:, prompt_length:] for batch in prompt_completion_batches]
+        completion_masks = [self._completion_mask(batch) for batch in completion_id_batches]
+        completions = [
+            text
+            for batch in completion_id_batches
+            for text in self.processor.batch_decode(batch, skip_special_tokens=True)
+        ]
         actions, rewards_list, valid_list = self._actions_and_rewards(completions)
         valid_count = int(sum(valid_list))
         selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
         selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
+        action_span_masks, action_spans_available = self._action_span_masks(
+            completion_id_batches, completion_masks, completions
+        ) if self.action_span_only else (completion_masks, [True] * len(completions))
+        quality_scores = [0.0] * len(actions)
+        cluster_members: List[int] = []
+        cluster_outlier = None
+        cluster_ratio = None
+        cluster_quality_margin = None
+        if self.update_policy == "cluster_gated":
+            # Score candidates under the episode-initial adapter.  Restoring the
+            # current tensors before constructing the trainable graph avoids
+            # self-reinforcing quality scores and does not consume RNG.
+            current_snapshot = self._parameter_snapshot()
+            self._restore_parameter_snapshot([
+                self.base_adapter_state[name] for name, _ in self.trainable_parameters
+            ])
+            self.model.eval()
+            with torch.no_grad():
+                frozen_logp_batches = self._candidate_logps_batches(
+                    prompt_inputs, prompt_completion_batches, completion_masks,
+                    prompt_length, separate_candidate_batches,
+                )
+                frozen_means = self._candidate_mean_logps(
+                    frozen_logp_batches, action_span_masks
+                ).detach().cpu().tolist()
+                del frozen_logp_batches
+            self._restore_parameter_snapshot(current_snapshot)
+            confidence_scores = self._normalized_scores(frozen_means)
+            quality_scores = [
+                float(max(-1.0, min(1.0, confidence - self._behavior_penalty(action))))
+                for confidence, action in zip(confidence_scores, actions)
+            ]
+            (
+                update_eligible, update_gate_reason, cluster_members, cluster_outlier,
+                cluster_ratio, cluster_quality_margin,
+            ) = self._cluster_gate(
+                actions, valid_list, action_spans_available, quality_scores
+            )
+            reward_std = float(np.std(rewards_list))
+            reward_margin = 0.0
+            combined_rewards = [
+                (1.0 - self.cluster_quality_weight) * reward
+                + self.cluster_quality_weight * quality
+                for reward, quality in zip(rewards_list, quality_scores)
+            ]
+            selected_candidate_index = max(
+                cluster_members,
+                key=lambda index: (combined_rewards[index], -index),
+            ) if cluster_members else selected_candidate_index
+            selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
+        else:
+            update_eligible, update_gate_reason, reward_std, reward_margin = self._update_gate(
+                rewards_list, valid_list, action_spans_available
+            )
+            combined_rewards = list(rewards_list)
+        if self.update_policy in {"gated", "cluster_gated"} and update_eligible and before_checksum is None:
+            before_checksum = self.adapter_checksum()
 
         loss_forward_start = time.perf_counter()
         self.model.train()
-        prompt_mask = prompt_inputs["attention_mask"].repeat_interleave(
-            self.num_generations, dim=0
+        per_token_logps_batches = self._candidate_logps_batches(
+            prompt_inputs, prompt_completion_batches, completion_masks,
+            prompt_length, separate_candidate_batches,
         )
-        attention_mask = torch.cat([prompt_mask, completion_mask.to(prompt_mask.dtype)], dim=1)
-        per_token_logps = self._per_token_logps(
-            self.model,
-            prompt_completion_ids,
-            attention_mask,
-            self._repeat_pixel_values(prompt_inputs["pixel_values"], self.num_generations),
-            prompt_inputs["image_grid_thw"].repeat_interleave(self.num_generations, dim=0),
-        )[:, prompt_length - 1 :]
 
-        rewards = torch.tensor(rewards_list, dtype=per_token_logps.dtype, device=per_token_logps.device)
-        valid_mask = torch.tensor(valid_list, dtype=torch.bool, device=per_token_logps.device)
+        reference_logps = per_token_logps_batches[0]
+        rewards = torch.tensor(rewards_list, dtype=reference_logps.dtype, device=reference_logps.device)
+        valid_mask = torch.tensor(valid_list, dtype=torch.bool, device=reference_logps.device)
         advantages = torch.zeros_like(rewards)
         if valid_count:
             valid_rewards = rewards[valid_mask]
@@ -228,9 +618,63 @@ class TrajectoryConsensusUpdater:
             )
         # The detached copy makes this the usual score-function surrogate while
         # retaining a differentiable tensor for the all-equal-reward case.
-        per_token_loss = -torch.exp(per_token_logps - per_token_logps.detach()) * advantages.unsqueeze(1)
-        per_candidate_loss = (per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1).clamp_min(1)
-        loss = per_candidate_loss[valid_mask].mean() if valid_count else per_token_logps.sum() * 0.0
+        if separate_candidate_batches:
+            per_candidate_loss = []
+            for index, (per_token_logps, completion_mask) in enumerate(
+                zip(per_token_logps_batches, action_span_masks)
+            ):
+                per_token_loss = -torch.exp(
+                    per_token_logps - per_token_logps.detach()
+                ) * advantages[index]
+                per_candidate_loss.append(
+                    (per_token_loss * completion_mask).sum()
+                    / completion_mask.sum().clamp_min(1)
+                )
+            per_candidate_loss = torch.stack(per_candidate_loss)
+            zero_loss = sum(batch.sum() * 0.0 for batch in per_token_logps_batches)
+        else:
+            per_token_logps = per_token_logps_batches[0]
+            completion_mask = action_span_masks[0]
+            per_token_loss = -torch.exp(
+                per_token_logps - per_token_logps.detach()
+            ) * advantages.unsqueeze(1)
+            per_candidate_loss = (
+                (per_token_loss * completion_mask).sum(dim=1)
+                / completion_mask.sum(dim=1).clamp_min(1)
+            )
+            zero_loss = per_token_logps.sum() * 0.0
+        legacy_policy_loss = per_candidate_loss[valid_mask].mean() if valid_count else zero_loss
+        candidate_mean_logps = self._candidate_mean_logps(
+            per_token_logps_batches, action_span_masks
+        )
+        if self.update_policy == "gated" and update_eligible:
+            valid_indices = [index for index, is_valid in enumerate(valid_list) if is_valid]
+            best_index = selected_candidate_index
+            worst_index = min(valid_indices, key=lambda index: (rewards_list[index], index))
+            policy_loss = -F.logsigmoid(
+                self.pairwise_beta
+                * (candidate_mean_logps[best_index] - candidate_mean_logps[worst_index])
+            )
+            policy_loss_type = "best_vs_worst_action_logp"
+        elif self.update_policy == "cluster_gated" and update_eligible:
+            positive_logp = candidate_mean_logps[cluster_members].mean()
+            negative_logp = candidate_mean_logps[cluster_outlier]
+            policy_loss = -F.logsigmoid(
+                self.pairwise_beta * (positive_logp - negative_logp)
+            )
+            policy_loss_type = "cluster_vs_outlier_action_logp"
+        elif self.update_policy in {"gated", "cluster_gated"}:
+            policy_loss = zero_loss
+            policy_loss_type = "skipped_by_gate"
+        else:
+            policy_loss = legacy_policy_loss
+            policy_loss_type = "legacy_standardized_advantage"
+        anchor_loss = (
+            self._anchor_l2_loss()
+            if update_eligible and self.anchor_l2_weight > 0
+            else zero_loss
+        )
+        loss = policy_loss + self.anchor_l2_weight * anchor_loss
         timing["loss_forward"] = time.perf_counter() - loss_forward_start
 
         backward_start = time.perf_counter()
@@ -243,11 +687,49 @@ class TrajectoryConsensusUpdater:
             torch.nn.utils.clip_grad_norm_(
                 [parameter for _, parameter in self.trainable_parameters], self.max_grad_norm
             )
-        if not self.disable_update:
+        optimizer_step_executed = False
+        update_rolled_back = False
+        rollback_reason = None
+        parameter_snapshot = None
+        optimizer_snapshot = None
+        protection_enabled = (
+            self.update_policy in {"gated", "cluster_gated"} or self.max_adapter_delta_norm > 0
+        )
+        if update_eligible:
+            self.update_opportunity_count += 1
+        if not self.disable_update and update_eligible:
+            if protection_enabled:
+                parameter_snapshot = self._parameter_snapshot()
+                optimizer_snapshot = self._optimizer_snapshot()
             self.optimizer.step()
+            optimizer_step_executed = True
+            if protection_enabled:
+                parameters_finite = all(
+                    bool(torch.isfinite(parameter.detach()).all().item())
+                    for _, parameter in self.trainable_parameters
+                )
+                adapter_delta_norm = self.adapter_delta_norm()
+                if not parameters_finite:
+                    rollback_reason = "nonfinite_adapter_parameter"
+                elif (
+                    self.max_adapter_delta_norm > 0
+                    and adapter_delta_norm > self.max_adapter_delta_norm
+                ):
+                    rollback_reason = "adapter_delta_norm_exceeded"
+                if rollback_reason is not None:
+                    self._restore_parameter_snapshot(parameter_snapshot)
+                    self._restore_optimizer_snapshot(optimizer_snapshot)
+                    optimizer_step_executed = False
+                    update_rolled_back = True
+            if optimizer_step_executed:
+                self.optimizer_step_count += 1
         timing["optimizer"] = time.perf_counter() - optimizer_start
         after_norm = self.adapter_norm()
-        after_checksum = self.adapter_checksum() if self.disable_update else None
+        adapter_delta_norm = self.adapter_delta_norm() if protection_enabled else None
+        checksum_required = self.disable_update or (
+            self.update_policy in {"gated", "cluster_gated"} and update_eligible
+        )
+        after_checksum = self.adapter_checksum() if checksum_required else None
         parameters_unchanged = None
         if self.disable_update:
             parameters_unchanged = all(
@@ -256,12 +738,29 @@ class TrajectoryConsensusUpdater:
             )
             if not parameters_unchanged or before_checksum != after_checksum or before_norm != after_norm:
                 raise RuntimeError("LoRA parameters changed while optimizer updates were disabled")
+        elif self.update_policy in {"gated", "cluster_gated"}:
+            parameters_unchanged = (
+                True if not update_eligible else before_checksum == after_checksum
+            )
 
         result = {
             "selected_actions": selected_actions,
             "loss": float(loss.detach().item()),
+            "policy_loss": float(policy_loss.detach().item()),
+            "policy_loss_type": policy_loss_type,
+            "anchor_loss": float(anchor_loss.detach().item()),
             "rewards": [float(reward) for reward in rewards_list],
-            "reward_std": float(np.std([rewards_list[i] for i, valid in enumerate(valid_list) if valid])) if valid_count else 0.0,
+            "quality_scores": quality_scores,
+            "combined_rewards": combined_rewards,
+            "cluster_members": cluster_members,
+            "cluster_outlier": cluster_outlier,
+            "cluster_ratio": cluster_ratio,
+            "cluster_quality_margin": cluster_quality_margin,
+            "cluster_quality_weight": self.cluster_quality_weight,
+            "max_cluster_ratio": self.max_cluster_ratio,
+            "min_cluster_quality_margin": self.min_cluster_quality_margin,
+            "reward_std": reward_std,
+            "reward_margin": reward_margin,
             "valid_count": valid_count,
             "timing": timing,
             "adapter_norm_before": before_norm,
@@ -269,7 +768,30 @@ class TrajectoryConsensusUpdater:
             "adapter_checksum_before": before_checksum,
             "adapter_checksum_after": after_checksum,
             "parameters_unchanged": parameters_unchanged,
-            "update_enabled": not self.disable_update,
+            "update_enabled": optimizer_step_executed,
+            "update_eligible": update_eligible,
+            "update_gate_reason": update_gate_reason,
+            "optimizer_step_executed": optimizer_step_executed,
+            "effective_parameter_change": (
+                None if parameters_unchanged is None else not parameters_unchanged
+            ),
+            "update_rolled_back": update_rolled_back,
+            "rollback_reason": rollback_reason,
+            "episode_update_opportunities": self.update_opportunity_count,
+            "episode_optimizer_steps": self.optimizer_step_count,
+            "adapter_delta_norm": adapter_delta_norm,
+            "action_span_only": self.action_span_only,
+            "action_spans_available": action_spans_available,
+            "pairwise_beta": self.pairwise_beta,
+            "reward_geometry": self.reward_geometry,
+            "orientation_distance_scale": self.orientation_distance_scale,
+            "stop_distance_penalty": self.stop_distance_penalty,
+            "candidate_sampling": self.candidate_sampling,
+            "candidate_sampling_modes": [
+                "stochastic" if config.do_sample else "greedy"
+                for config in candidate_generation_configs
+                for _ in range(config.num_return_sequences)
+            ],
             "completions": completions,
         }
         if self.trace_metadata_enabled:
@@ -351,17 +873,9 @@ class TrajectoryConsensusUpdater:
         if len(valid_indices) == 1:
             rewards[valid_indices[0]] = 1.0
             return rewards.tolist()
-        trajectories = [self._trajectory(actions[index]) for index in valid_indices]
-        valid_count = len(trajectories)
-        distances = np.zeros((valid_count, valid_count), dtype=np.float32)
-        for i in range(valid_count):
-            for j in range(i + 1, valid_count):
-                distance, _ = fastdtw(
-                    trajectories[i], trajectories[j],
-                    dist=lambda first, second: np.linalg.norm(np.asarray(first[:2]) - np.asarray(second[:2])),
-                )
-                distances[i, j] = distance
-                distances[j, i] = distance
+        valid_actions = [actions[index] for index in valid_indices]
+        distances = self._trajectory_distance_matrix(valid_actions)
+        valid_count = len(valid_actions)
         mean_distance = distances.mean(axis=1)
         if np.ptp(mean_distance) < 1e-6:
             valid_rewards = np.ones(valid_count, dtype=np.float32)
@@ -370,11 +884,32 @@ class TrajectoryConsensusUpdater:
         rewards[valid_indices] = valid_rewards
         return rewards.tolist()
 
+    def _trajectory_distance_matrix(self, actions: Sequence[List[int]]) -> np.ndarray:
+        trajectories = [self._trajectory(action) for action in actions]
+        count = len(trajectories)
+        distances = np.zeros((count, count), dtype=np.float32)
+        for i in range(count):
+            for j in range(i + 1, count):
+                distance, path = fastdtw(
+                    trajectories[i], trajectories[j], dist=self._trajectory_point_distance
+                )
+                if self.reward_geometry == "se2_stop":
+                    distance /= max(1, len(path))
+                distances[i, j] = distance
+                distances[j, i] = distance
+        return distances
+
     def _trajectory(self, action_sequence: Sequence[int]) -> List[List[float]]:
         x = y = theta = 0.0
-        trajectory = [[x, y, theta]]
+        stopped = 0.0
+        trajectory = [
+            [x, y, theta, stopped]
+            if self.reward_geometry == "se2_stop" else [x, y, theta]
+        ]
         for action in action_sequence:
-            if action == 1:
+            if action == 0 and self.reward_geometry == "se2_stop":
+                stopped = 1.0
+            elif action == 1:
                 x += (self.forward_distance / 100.0) * math.cos(theta)
                 y += (self.forward_distance / 100.0) * math.sin(theta)
             elif action == 2:
@@ -382,5 +917,24 @@ class TrajectoryConsensusUpdater:
             elif action == 3:
                 theta -= math.radians(self.turn_angle)
             theta = (theta + math.pi) % (2 * math.pi) - math.pi
-            trajectory.append([x, y, theta])
+            trajectory.append(
+                [x, y, theta, stopped]
+                if self.reward_geometry == "se2_stop" else [x, y, theta]
+            )
+            if stopped:
+                break
         return trajectory
+
+    def _trajectory_point_distance(self, first: Sequence[float], second: Sequence[float]) -> float:
+        if self.reward_geometry == "xy":
+            return float(np.linalg.norm(np.asarray(first[:2]) - np.asarray(second[:2])))
+        angle_delta = math.atan2(
+            math.sin(first[2] - second[2]), math.cos(first[2] - second[2])
+        )
+        values = (
+            first[0] - second[0],
+            first[1] - second[1],
+            self.orientation_distance_scale * angle_delta,
+            self.stop_distance_penalty * (first[3] - second[3]),
+        )
+        return math.sqrt(sum(value * value for value in values))

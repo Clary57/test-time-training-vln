@@ -1,0 +1,1177 @@
+{
+  "episode_ids": [
+    "272",
+    "325",
+    "722",
+    "860",
+    "1459",
+    "1580",
+    "1080",
+    "319",
+    "619",
+    "694",
+    "483",
+    "570",
+    "677",
+    "678",
+    "977",
+    "298",
+    "523",
+    "567",
+    "660",
+    "699",
+    "1038",
+    "1712",
+    "246",
+    "598",
+    "685",
+    "592",
+    "1134",
+    "1193",
+    "270",
+    "838",
+    "1533",
+    "1577",
+    "414",
+    "32",
+    "199",
+    "87",
+    "746",
+    "899",
+    "900",
+    "1099",
+    "1377",
+    "1476",
+    "1520",
+    "215",
+    "216",
+    "266",
+    "278",
+    "959",
+    "1255",
+    "198",
+    "1304",
+    "1564",
+    "1745",
+    "68",
+    "1097",
+    "1139",
+    "1359",
+    "1428",
+    "1561",
+    "34",
+    "597",
+    "991",
+    "1020",
+    "1076",
+    "1366",
+    "1762",
+    "370",
+    "748",
+    "1090",
+    "1224",
+    "323",
+    "669",
+    "704",
+    "234",
+    "684",
+    "998",
+    "1484",
+    "554",
+    "1670",
+    "126",
+    "446",
+    "924",
+    "1197",
+    "1323",
+    "1333",
+    "1523",
+    "70",
+    "180",
+    "263",
+    "497",
+    "932",
+    "1729",
+    "1801",
+    "1235",
+    "347",
+    "775",
+    "1233",
+    "152",
+    "891",
+    "943",
+    "1158",
+    "1513",
+    "1514",
+    "360",
+    "473",
+    "768",
+    "1121",
+    "1175",
+    "217",
+    "219",
+    "602",
+    "904",
+    "1164",
+    "1787",
+    "1820",
+    "707",
+    "850",
+    "1045",
+    "230",
+    "1051",
+    "1798",
+    "369",
+    "673",
+    "1024",
+    "1682",
+    "1684",
+    "1734",
+    "1774"
+  ],
+  "metadata": {
+    "sample_size": 128,
+    "selection_seed": 42,
+    "evaluation_seed": 41,
+    "dataset_split": "val_unseen",
+    "dataset_sha256": "1767a407e2c8a011fbb7abece76cd64c5b39ff9fa0e9e340ebdce5a490d167c3",
+    "gt_sha256": "46a2e02c4a5e3b9d3d3c936009cbe1a4e9ea8f34156589f1e69ff1ff7080c044",
+    "path_length_definition": "dataset.reference_path point count (GT locations fallback)",
+    "length_class_definition": "within-scene path-length tertiles; stable tie-break by integer episode_id",
+    "selection_algorithm": "exclude pilot72; target pooled200 population class proportions; population-proportional class\u00d7scene deficit largest remainder; seed-42 draws",
+    "selection_uses_model_results": false,
+    "population_episode_count": 1839,
+    "excluded_pilot_count": 72,
+    "class_counts": {
+      "short": 43,
+      "middle": 43,
+      "long": 42
+    },
+    "selected_episodes": [
+      {
+        "episode_id": "272",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 44,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "325",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "722",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 40,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "860",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1459",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 8,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1580",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 31,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1080",
+        "scene_id": "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+        "path_length": 4,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "319",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "619",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "694",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 31,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "483",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "570",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 33,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "677",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 39,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "678",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "977",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 41,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "298",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 31,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "523",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "567",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 22,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "660",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 35,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "699",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1038",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 35,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1712",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 26,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "246",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "598",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 24,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "685",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 15,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "592",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 28,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1134",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 38,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1193",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 15,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "270",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "838",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1533",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 19,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1577",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "414",
+        "scene_id": "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "32",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "199",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "87",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "746",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 33,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "899",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 25,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "900",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 43,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1099",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1377",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 29,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1476",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 19,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1520",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "length_class": "short",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "215",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 37,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "216",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 22,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "266",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 35,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "278",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 18,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "959",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 30,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1255",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 15,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "198",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 6,
+        "instruction_length": 32,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1304",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 38,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1564",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1745",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 30,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "68",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 32,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1097",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 20,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1139",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 23,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1359",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 55,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1428",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 23,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1561",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "34",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 20,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "597",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "991",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 22,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1020",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 25,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1076",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 19,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1366",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 26,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1762",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 23,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "370",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 6,
+        "instruction_length": 39,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "748",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 6,
+        "instruction_length": 18,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1090",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 6,
+        "instruction_length": 16,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1224",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "323",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 6,
+        "instruction_length": 16,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "669",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 6,
+        "instruction_length": 26,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "704",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 6,
+        "instruction_length": 13,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "234",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 33,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "684",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 40,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "998",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 10,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1484",
+        "scene_id": "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb",
+        "path_length": 6,
+        "instruction_length": 51,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "554",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 6,
+        "instruction_length": 19,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1670",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 11,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "126",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 13,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "446",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 37,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "924",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 12,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1197",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 25,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1323",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 34,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1333",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 36,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1523",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 15,
+        "length_class": "middle",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "70",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 27,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "180",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 38,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "263",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 35,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "497",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 29,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "932",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 29,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1729",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 23,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1801",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 24,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1235",
+        "scene_id": "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+        "path_length": 6,
+        "instruction_length": 20,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "347",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 6,
+        "instruction_length": 22,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "775",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 7,
+        "instruction_length": 14,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1233",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "152",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 26,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "891",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 33,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "943",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 23,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1158",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 36,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1513",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 27,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1514",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 36,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "360",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 35,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "473",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 28,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "768",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 47,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1121",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 42,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1175",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 40,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "217",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 22,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "219",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 21,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "602",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 23,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "904",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 40,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1164",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 19,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1787",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 21,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1820",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 16,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "707",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 25,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "850",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 26,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1045",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 41,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "230",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 7,
+        "instruction_length": 24,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1051",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 7,
+        "instruction_length": 17,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1798",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 7,
+        "instruction_length": 20,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "369",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 30,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "673",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 31,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1024",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 47,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1682",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 24,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1684",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 28,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1734",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 22,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      },
+      {
+        "episode_id": "1774",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 24,
+        "length_class": "long",
+        "selection_reason": "population-proportional pooled class\u00d7scene deficit allocation; seed-42 within-scene draw"
+      }
+    ]
+  }
+}

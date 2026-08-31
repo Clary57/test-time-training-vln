@@ -1,0 +1,16 @@
+{
+  "protocol": "official-navida-frozen-full-val-unseen",
+  "official_repository": "https://github.com/waynechu1021/NAVIDA.git",
+  "official_commit": "b86316a78a2865c80b445ed5a8fcc08fc0243dfb",
+  "evaluator": "ttrl-src/eval/eval_official_subset.py",
+  "split_num": 8,
+  "max_action_history": 200,
+  "max_executed_chunks": 2,
+  "num_generations": 1,
+  "temperature": 0.2,
+  "max_new_tokens": 512,
+  "top_p": 1.0,
+  "repetition_penalty": 1.05,
+  "lora": false,
+  "adaptation": false
+}
