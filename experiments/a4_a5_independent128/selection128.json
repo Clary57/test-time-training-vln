@@ -1,0 +1,1422 @@
+{
+  "episode_ids": [
+    "103",
+    "1068",
+    "1147",
+    "1194",
+    "12",
+    "1283",
+    "1308",
+    "1355",
+    "1440",
+    "1461",
+    "1468",
+    "150",
+    "1521",
+    "1528",
+    "1565",
+    "1576",
+    "1597",
+    "1618",
+    "1624",
+    "1635",
+    "1645",
+    "1702",
+    "1722",
+    "1812",
+    "190",
+    "213",
+    "223",
+    "250",
+    "304",
+    "326",
+    "363",
+    "382",
+    "404",
+    "432",
+    "434",
+    "481",
+    "492",
+    "593",
+    "658",
+    "778",
+    "805",
+    "835",
+    "92",
+    "101",
+    "1014",
+    "1015",
+    "1023",
+    "1030",
+    "1058",
+    "1059",
+    "1126",
+    "1135",
+    "1174",
+    "1176",
+    "1248",
+    "1268",
+    "134",
+    "1357",
+    "1360",
+    "1398",
+    "1477",
+    "1569",
+    "165",
+    "17",
+    "1707",
+    "1715",
+    "1735",
+    "267",
+    "330",
+    "401",
+    "423",
+    "503",
+    "528",
+    "584",
+    "61",
+    "612",
+    "613",
+    "726",
+    "752",
+    "789",
+    "858",
+    "868",
+    "869",
+    "916",
+    "970",
+    "997",
+    "1042",
+    "1114",
+    "1189",
+    "1243",
+    "1245",
+    "1290",
+    "1382",
+    "155",
+    "1594",
+    "1639",
+    "1676",
+    "1757",
+    "1758",
+    "1782",
+    "183",
+    "202",
+    "22",
+    "350",
+    "355",
+    "4",
+    "447",
+    "455",
+    "469",
+    "48",
+    "496",
+    "51",
+    "533",
+    "559",
+    "560",
+    "574",
+    "606",
+    "691",
+    "735",
+    "743",
+    "762",
+    "770",
+    "84",
+    "866",
+    "893",
+    "94",
+    "962",
+    "963"
+  ],
+  "metadata": {
+    "sample_size": 128,
+    "selection_seed": 43,
+    "evaluation_seed": 41,
+    "dataset_split": "val_unseen",
+    "dataset_sha256": "1767a407e2c8a011fbb7abece76cd64c5b39ff9fa0e9e340ebdce5a490d167c3",
+    "gt_sha256": "46a2e02c4a5e3b9d3d3c936009cbe1a4e9ea8f34156589f1e69ff1ff7080c044",
+    "path_length_definition": "dataset.reference_path point count (GT locations fallback)",
+    "length_class_definition": "within-scene path-length tertiles; stable episode-id ordering",
+    "selection_algorithm": "capacity-proportional class\u00d7scene allocation; seed-43 within-scene/class draw",
+    "selection_uses_model_results": false,
+    "excluded_pilot72_count": 72,
+    "excluded_confirmatory128_count": 128,
+    "class_counts": {
+      "short": 43,
+      "middle": 43,
+      "long": 42
+    },
+    "selected_episodes": [
+      {
+        "episode_id": "103",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 10,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1068",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 22,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1147",
+        "scene_id": "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+        "path_length": 4,
+        "instruction_length": 9,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1194",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "12",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 16,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1283",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1308",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 16,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1355",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 10,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1440",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 31,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1461",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 12,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1468",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 8,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "150",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 36,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1521",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1528",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1565",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 25,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1576",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 25,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1597",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 11,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1618",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 30,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1624",
+        "scene_id": "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1635",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 15,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1645",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 10,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1702",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1722",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 30,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1812",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "190",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 22,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "213",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 26,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "223",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 12,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "250",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 13,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "304",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 26,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "326",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 37,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "363",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 24,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "382",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 24,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "404",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "432",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "434",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 32,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "481",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 22,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "492",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 29,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "593",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "658",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 20,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "778",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 36,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "805",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 5,
+        "instruction_length": 21,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "835",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 27,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "92",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 5,
+        "instruction_length": 31,
+        "path_length_bin": "short",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "101",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 6,
+        "instruction_length": 12,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1014",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 31,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1015",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 57,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1023",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 16,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1030",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 18,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1058",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 13,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1059",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 11,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1126",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 14,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1135",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 14,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1174",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 40,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1176",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 50,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1248",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 14,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1268",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "134",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 6,
+        "instruction_length": 29,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1357",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 32,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1360",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1398",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1477",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 48,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1569",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 6,
+        "instruction_length": 35,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "165",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 28,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "17",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 15,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1707",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 37,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1715",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 18,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1735",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 30,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "267",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 33,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "330",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 39,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "401",
+        "scene_id": "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+        "path_length": 4,
+        "instruction_length": 12,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "423",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 20,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "503",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "528",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 15,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "584",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 5,
+        "instruction_length": 23,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "61",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 6,
+        "instruction_length": 35,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "612",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 6,
+        "instruction_length": 31,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "613",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 6,
+        "instruction_length": 23,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "726",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 19,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "752",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 5,
+        "instruction_length": 34,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "789",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 43,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "858",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 5,
+        "instruction_length": 18,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "868",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 42,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "869",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 5,
+        "instruction_length": 24,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "916",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 6,
+        "instruction_length": 17,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "970",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 5,
+        "instruction_length": 17,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "997",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 6,
+        "instruction_length": 37,
+        "path_length_bin": "middle",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1042",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 49,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1114",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 42,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1189",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 24,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1243",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 7,
+        "instruction_length": 10,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1245",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 7,
+        "instruction_length": 12,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1290",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 16,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1382",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 23,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "155",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 40,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1594",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 7,
+        "instruction_length": 33,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1639",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 41,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1676",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 15,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1757",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 43,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1758",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 29,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "1782",
+        "scene_id": "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb",
+        "path_length": 6,
+        "instruction_length": 31,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "183",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 30,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "202",
+        "scene_id": "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+        "path_length": 7,
+        "instruction_length": 36,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "22",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 36,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "350",
+        "scene_id": "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+        "path_length": 7,
+        "instruction_length": 29,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "355",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 39,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "4",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 22,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "447",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 21,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "455",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 38,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "469",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 21,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "48",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 33,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "496",
+        "scene_id": "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+        "path_length": 7,
+        "instruction_length": 74,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "51",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 57,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "533",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 16,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "559",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 32,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "560",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 23,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "574",
+        "scene_id": "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+        "path_length": 7,
+        "instruction_length": 25,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "606",
+        "scene_id": "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb",
+        "path_length": 7,
+        "instruction_length": 27,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "691",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 45,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "735",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 29,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "743",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 27,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "762",
+        "scene_id": "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb",
+        "path_length": 7,
+        "instruction_length": 38,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "770",
+        "scene_id": "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb",
+        "path_length": 7,
+        "instruction_length": 18,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "84",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 6,
+        "instruction_length": 30,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "866",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 38,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "893",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 7,
+        "instruction_length": 21,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "94",
+        "scene_id": "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+        "path_length": 7,
+        "instruction_length": 27,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "962",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 27,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      },
+      {
+        "episode_id": "963",
+        "scene_id": "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+        "path_length": 6,
+        "instruction_length": 17,
+        "path_length_bin": "long",
+        "selection_reason": "capacity-proportional largest-remainder allocation; seeded within-scene/class draw"
+      }
+    ],
+    "allocation_audit": {
+      "short": {
+        "requested": 43,
+        "available": 547,
+        "scene_quotas": {
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb": {
+            "remaining_candidates": 75,
+            "exact_quota": 5.8957952468007315,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb": {
+            "remaining_candidates": 12,
+            "exact_quota": 0.943327239488117,
+            "floor_quota": 0,
+            "allocated": 1
+          },
+          "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb": {
+            "remaining_candidates": 38,
+            "exact_quota": 2.987202925045704,
+            "floor_quota": 2,
+            "allocated": 3
+          },
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb": {
+            "remaining_candidates": 76,
+            "exact_quota": 5.974405850091408,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb": {
+            "remaining_candidates": 78,
+            "exact_quota": 6.131627056672761,
+            "floor_quota": 6,
+            "allocated": 6
+          },
+          "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb": {
+            "remaining_candidates": 42,
+            "exact_quota": 3.3016453382084094,
+            "floor_quota": 3,
+            "allocated": 3
+          },
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb": {
+            "remaining_candidates": 47,
+            "exact_quota": 3.6946983546617918,
+            "floor_quota": 3,
+            "allocated": 4
+          },
+          "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb": {
+            "remaining_candidates": 53,
+            "exact_quota": 4.16636197440585,
+            "floor_quota": 4,
+            "allocated": 4
+          },
+          "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb": {
+            "remaining_candidates": 5,
+            "exact_quota": 0.3930530164533821,
+            "floor_quota": 0,
+            "allocated": 1
+          },
+          "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb": {
+            "remaining_candidates": 30,
+            "exact_quota": 2.3583180987202925,
+            "floor_quota": 2,
+            "allocated": 2
+          },
+          "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb": {
+            "remaining_candidates": 91,
+            "exact_quota": 7.1535648994515535,
+            "floor_quota": 7,
+            "allocated": 7
+          }
+        },
+        "refill_order": [
+          "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+          "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb"
+        ],
+        "selected": 43
+      },
+      "middle": {
+        "requested": 43,
+        "available": 547,
+        "scene_quotas": {
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb": {
+            "remaining_candidates": 76,
+            "exact_quota": 5.974405850091408,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb": {
+            "remaining_candidates": 12,
+            "exact_quota": 0.943327239488117,
+            "floor_quota": 0,
+            "allocated": 1
+          },
+          "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb": {
+            "remaining_candidates": 41,
+            "exact_quota": 3.223034734917733,
+            "floor_quota": 3,
+            "allocated": 3
+          },
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb": {
+            "remaining_candidates": 76,
+            "exact_quota": 5.974405850091408,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb": {
+            "remaining_candidates": 77,
+            "exact_quota": 6.053016453382084,
+            "floor_quota": 6,
+            "allocated": 6
+          },
+          "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb": {
+            "remaining_candidates": 43,
+            "exact_quota": 3.380255941499086,
+            "floor_quota": 3,
+            "allocated": 3
+          },
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb": {
+            "remaining_candidates": 47,
+            "exact_quota": 3.6946983546617918,
+            "floor_quota": 3,
+            "allocated": 4
+          },
+          "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb": {
+            "remaining_candidates": 53,
+            "exact_quota": 4.16636197440585,
+            "floor_quota": 4,
+            "allocated": 4
+          },
+          "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb": {
+            "remaining_candidates": 5,
+            "exact_quota": 0.3930530164533821,
+            "floor_quota": 0,
+            "allocated": 0
+          },
+          "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb": {
+            "remaining_candidates": 31,
+            "exact_quota": 2.436928702010969,
+            "floor_quota": 2,
+            "allocated": 3
+          },
+          "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb": {
+            "remaining_candidates": 86,
+            "exact_quota": 6.760511882998172,
+            "floor_quota": 6,
+            "allocated": 7
+          }
+        },
+        "refill_order": [
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+          "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb",
+          "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb"
+        ],
+        "selected": 43
+      },
+      "long": {
+        "requested": 42,
+        "available": 545,
+        "scene_quotas": {
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb": {
+            "remaining_candidates": 74,
+            "exact_quota": 5.702752293577982,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb": {
+            "remaining_candidates": 12,
+            "exact_quota": 0.9247706422018349,
+            "floor_quota": 0,
+            "allocated": 1
+          },
+          "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb": {
+            "remaining_candidates": 38,
+            "exact_quota": 2.928440366972477,
+            "floor_quota": 2,
+            "allocated": 3
+          },
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb": {
+            "remaining_candidates": 76,
+            "exact_quota": 5.856880733944954,
+            "floor_quota": 5,
+            "allocated": 6
+          },
+          "mp3d/TbHJrupSAjP/TbHJrupSAjP.glb": {
+            "remaining_candidates": 80,
+            "exact_quota": 6.165137614678899,
+            "floor_quota": 6,
+            "allocated": 6
+          },
+          "mp3d/X7HyMhZNoso/X7HyMhZNoso.glb": {
+            "remaining_candidates": 41,
+            "exact_quota": 3.159633027522936,
+            "floor_quota": 3,
+            "allocated": 3
+          },
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb": {
+            "remaining_candidates": 47,
+            "exact_quota": 3.622018348623853,
+            "floor_quota": 3,
+            "allocated": 4
+          },
+          "mp3d/oLBMNvg9in8/oLBMNvg9in8.glb": {
+            "remaining_candidates": 53,
+            "exact_quota": 4.084403669724771,
+            "floor_quota": 4,
+            "allocated": 4
+          },
+          "mp3d/pLe4wQe7qrG/pLe4wQe7qrG.glb": {
+            "remaining_candidates": 5,
+            "exact_quota": 0.3853211009174312,
+            "floor_quota": 0,
+            "allocated": 0
+          },
+          "mp3d/x8F5xyUWy9e/x8F5xyUWy9e.glb": {
+            "remaining_candidates": 29,
+            "exact_quota": 2.234862385321101,
+            "floor_quota": 2,
+            "allocated": 2
+          },
+          "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb": {
+            "remaining_candidates": 90,
+            "exact_quota": 6.935779816513762,
+            "floor_quota": 6,
+            "allocated": 7
+          }
+        },
+        "refill_order": [
+          "mp3d/zsNo4HB9uLZ/zsNo4HB9uLZ.glb",
+          "mp3d/EU6Fwq7SyZv/EU6Fwq7SyZv.glb",
+          "mp3d/8194nk5LbLH/8194nk5LbLH.glb",
+          "mp3d/QUCTc6BB5sX/QUCTc6BB5sX.glb",
+          "mp3d/2azQ1b91cZZ/2azQ1b91cZZ.glb",
+          "mp3d/Z6MFQCViBuw/Z6MFQCViBuw.glb"
+        ],
+        "selected": 42
+      }
+    }
+  }
+}
