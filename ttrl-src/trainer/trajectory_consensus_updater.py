@@ -546,6 +546,7 @@ class TrajectoryConsensusUpdater:
             completion_id_batches, completion_masks, completions
         ) if self.action_span_only else (completion_masks, [True] * len(completions))
         quality_scores = [0.0] * len(actions)
+        frozen_candidate_mean_logps = None
         cluster_members: List[int] = []
         cluster_outlier = None
         cluster_ratio = None
@@ -569,6 +570,7 @@ class TrajectoryConsensusUpdater:
                 ).detach().cpu().tolist()
                 del frozen_logp_batches
             self._restore_parameter_snapshot(current_snapshot)
+            frozen_candidate_mean_logps = [float(value) for value in frozen_means]
             confidence_scores = self._normalized_scores(frozen_means)
             quality_scores = [
                 float(max(-1.0, min(1.0, confidence - self._behavior_penalty(action))))
@@ -751,6 +753,11 @@ class TrajectoryConsensusUpdater:
             "anchor_loss": float(anchor_loss.detach().item()),
             "rewards": [float(reward) for reward in rewards_list],
             "quality_scores": quality_scores,
+            "frozen_candidate_mean_logps": frozen_candidate_mean_logps,
+            "candidate_confidence_definition": (
+                "episode_initial_adapter_length_normalized_action_token_mean_logp"
+                if frozen_candidate_mean_logps is not None else None
+            ),
             "combined_rewards": combined_rewards,
             "cluster_members": cluster_members,
             "cluster_outlier": cluster_outlier,

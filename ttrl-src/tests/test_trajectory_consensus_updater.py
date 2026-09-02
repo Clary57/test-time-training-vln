@@ -342,12 +342,47 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             result["candidate_sampling_modes"], ["greedy", "stochastic", "stochastic"]
         )
         self.assertEqual(result["reward_geometry"], "se2_stop")
+        self.assertEqual(len(result["frozen_candidate_mean_logps"]), 3)
+        self.assertTrue(all(math.isfinite(value) for value in result[
+            "frozen_candidate_mean_logps"
+        ]))
+        self.assertEqual(
+            result["candidate_confidence_definition"],
+            "episode_initial_adapter_length_normalized_action_token_mean_logp",
+        )
         self.assertEqual(result["cluster_members"], [0, 1])
         self.assertEqual(result["cluster_outlier"], 2)
         self.assertTrue(result["update_eligible"])
         self.assertTrue(result["optimizer_step_executed"])
         self.assertEqual(result["selected_actions"], [3])
         self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
+
+    def test_confidence_observability_does_not_change_actions_updates_or_rng(self):
+        outcomes = []
+        for trace_enabled in (False, True):
+            model, updater = self._updater(
+                [3, 3, 4],
+                {3: "forward 25 cm", 4: "turn left 15 degree"},
+                update_policy="cluster_gated",
+                action_span_only=True,
+                cluster_quality_weight=0.25,
+                trace_metadata_enabled=trace_enabled,
+            )
+            updater.reset_episode("confidence-observability")
+            before_rng = torch.random.get_rng_state().clone()
+            result = updater.adapt_step(self._inputs())
+            outcomes.append((
+                result["selected_actions"],
+                result["rewards"],
+                result["quality_scores"],
+                result["frozen_candidate_mean_logps"],
+                result["optimizer_step_executed"],
+                torch.random.get_rng_state().clone(),
+                before_rng,
+            ))
+        self.assertEqual(outcomes[0][0:5], outcomes[1][0:5])
+        self.assertTrue(torch.equal(outcomes[0][5], outcomes[1][5]))
+        self.assertTrue(torch.equal(outcomes[0][6], outcomes[1][6]))
 
     def test_cluster_reference_scoring_does_not_change_default_behavior(self):
         outcomes = []

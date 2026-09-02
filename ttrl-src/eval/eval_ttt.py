@@ -671,6 +671,12 @@ class NaVIDA_Agent(Agent):
             "candidate_sampling": update_result["candidate_sampling"],
             "candidate_sampling_modes": update_result["candidate_sampling_modes"],
             "quality_scores": update_result["quality_scores"],
+            "frozen_candidate_mean_logps": update_result[
+                "frozen_candidate_mean_logps"
+            ],
+            "candidate_confidence_definition": update_result[
+                "candidate_confidence_definition"
+            ],
             "combined_rewards": update_result["combined_rewards"],
             "cluster_members": update_result["cluster_members"],
             "cluster_outlier": update_result["cluster_outlier"],
