@@ -4,3 +4,10 @@
 /ttrl-src/results/
 # original work
 /ori_ttrl-src/
+
+# Python-generated caches only; keep experiment logs/manifests visible.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

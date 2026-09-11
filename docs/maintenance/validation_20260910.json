@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "base_commit": "3dcfc892c2919438eb587e5d33861ca3baf97758",
+  "original_files": 86,
+  "byte_identical_original_files_after_moves": 85,
+  "only_changed_original_file": ".gitignore",
+  "moves": 5,
+  "bounded_runs_file_metadata_unchanged": 5334,
+  "current_B_evidence_hashes_verified": 391,
+  "no_original_source_shell_config_selection_binary_changed": true,
+  "environment_or_weight_content_audit": "not recursively hashed; no mutation commands targeted environments, model or datasets",
+  "runs_scope": "bounded max4 levels metadata plus391 selected source/B evidence hashes; no claim of a full-run-tree hash audit"
+}
