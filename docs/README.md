@@ -5,10 +5,11 @@
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [根 README](../README.md) | 当前有效 | 新成员总入口、结构、环境、阅读顺序 |
-| [CURRENT_STATUS](../CURRENT_STATUS.md) | 当前有效，2026-09-10快照 | 实现、验收、未知项和唯一优先事项 |
+| [CURRENT_STATUS](../CURRENT_STATUS.md) | 当前有效，更新至2026-09-14 | 实现、验收、未知项和待验证问题 |
 | [当前方法](method/CURRENT_METHOD.md) | 当前有效 | A4/A5/profile/当前B的边界 |
 | [复现说明](experiments/REPRODUCTION.md) | 当前有效 | CPU检查、cwd、canonical C0与A5入口 |
 | [结果索引](experiments/RESULTS_INDEX.md) | 当前有效，产物快照 | 已读结果、验收边界、不能直接比较的实验 |
+| [A5 600 / C0 全量实验说明](experiments/A5_C0_20260914.md) | 当前有效 | 完整结果、同 ID 对照与统计边界 |
 | [运行目录清单](experiments/RUN_DIRECTORIES.md) | 目录存在性快照 | 包含未独立验收的历史目录，不代表全部完成 |
 | [脚本索引](../scripts/README.md) | 当前有效 | 启动、selection、分析、验收及维护工具 |
 | [实验包说明](../experiments/README.md) | 当前有效 | 保留selection和包内路径的原因 |

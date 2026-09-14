@@ -1,6 +1,6 @@
 # 实验结果索引
 
-路径基准：`/hdd3/wangziyu/runs/test-time-training-vln`。本次只读检查，不移动或重写结果。VERIFIED只针对明确列出的检查；DOCUMENTED是既有分析文档的记录；UNKNOWN不得补成完成。完整目录存在性索引见[RUN_DIRECTORIES.md](RUN_DIRECTORIES.md)。
+路径基准：`/hdd3/wangziyu/runs/test-time-training-vln`。2026-09-14 增补 A5 600 与 C0 全量结果说明；未移动或重写原始结果。VERIFIED只针对明确列出的检查；DOCUMENTED是既有分析文档的记录；UNKNOWN不得补成完成。原有目录存在性快照见[RUN_DIRECTORIES.md](RUN_DIRECTORIES.md)，新增运行的完整说明见[A5/C0实验说明](A5_C0_20260914.md)。
 
 | 实验 | 样本 / Success | 证据与验收范围 | 比较边界 | 结果根 |
 |---|---|---|---|---|
@@ -16,12 +16,14 @@
 | new128 A4 | 128，72成功 | 128条唯一stats；worker exit=0 | 已用于开发 | [ttrl_a4_independent128_seed43_20260829_164245](/hdd3/wangziyu/runs/test-time-training-vln/ttrl_a4_independent128_seed43_20260829_164245) |
 | new128 R13 A5 | 128，71成功 | 128条唯一stats；4个worker exit=0 | T0.3、greedy+stochastic、更新开启；与当前B不配对 | [ttrl_a5_independent128_seed43_multigpu_20260902_141135](/hdd3/wangziyu/runs/test-time-training-vln/ttrl_a5_independent128_seed43_multigpu_20260902_141135) |
 | A5 confidence48 | DOCUMENTED：48，29成功 | 见audits/a5_confidence48_analysis_20260903_092453/HANDOFF.md | 前缀选择，非独立确认；本次未重算原始48 | [a5_confidence48_retry_20260902_231602](/hdd3/wangziyu/runs/test-time-training-vln/a5_confidence48_retry_20260902_231602) |
-| 当前T1.5 B-only | 128，66成功 | PASS_WITH_PROTOCOL_AMENDMENT；下方直达验收 | 完整new128开发；无同批A，不作配对更新效应结论 | [a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01](/hdd3/wangziyu/runs/test-time-training-vln/a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01) |
+| 先前T1.5 B-only | 128，66成功 | PASS_WITH_PROTOCOL_AMENDMENT；下方直达验收 | 完整new128开发；无同批A，不作配对更新效应结论 | [a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01](/hdd3/wangziyu/runs/test-time-training-vln/a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01) |
+| A5 T1.5 全 stochastic A600 | 600，305成功，SR 50.83% | 机器生成 `STRICT_VALIDATION_PASS`；2个worker exit=0，600条唯一stats/steps/STOP trace | 扩大开发集，重叠new128；A-only，不能单独证明更新收益 | [a5_t15_stochastic_A600_gpu67_83a4d2f_20260911_batch01](/hdd3/wangziyu/runs/test-time-training-vln/a5_t15_stochastic_A600_gpu67_83a4d2f_20260911_batch01) |
+| canonical C0 full val_unseen | 1,839，1,075成功，SR 58.46% | 8个worker exit=0；2026-09-14只读验收核对1,839唯一ID、manifest和有限指标；没有单独保存自动validation | 全量baseline；与A5同ID的600条347成功，跨协议比较不能隔离reward/optimizer | [canonical_c0_full1839_gpu34_83a4d2f_20260912_batch01](/hdd3/wangziyu/runs/test-time-training-vln/canonical_c0_full1839_gpu34_83a4d2f_20260912_batch01) |
 | stop diagnostic18 | 18设计；多臂、多次修订 | 存在多个validation/salvage/paired报告，须按适用范围读取 | 机制诊断，不能把条件性salvage当完整严格配对 | [stop_diagnostic18_20260820_103444](/hdd3/wangziyu/runs/test-time-training-vln/stop_diagnostic18_20260820_103444) |
 | dev16 | 目录存在；本次不补写指标 | UNKNOWN：未独立验收 | 开发 | [ttrl_cluster_quality_dev16_20260829_111444](/hdd3/wangziyu/runs/test-time-training-vln/ttrl_cluster_quality_dev16_20260829_111444) |
 | dev48 extension32 | 目录存在；本次不补写指标 | UNKNOWN：未独立验收 | 开发、扩展设计，不视为独立确认 | [ttrl_cluster_quality_dev48_extension32_20260829_125828](/hdd3/wangziyu/runs/test-time-training-vln/ttrl_cluster_quality_dev48_extension32_20260829_125828) |
 
-## 当前B的最终证据
+## 先前new128 B的最终证据
 
 - [最终report](/hdd3/wangziyu/runs/test-time-training-vln/a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01/analysis_after_continuation/report.json)：SR=51.5625%，Wilson 95% CI=[42.986%,60.048%]；OSR=60.9375%；SPL=0.471364、nDTW=0.654690、SDTW=0.456181、DTG=4.718697 m、PL=9.726449 m。
 - [最终validation](/hdd3/wangziyu/runs/test-time-training-vln/a5_t15_stochastic_B_new128_gpu4_3dcfc89_20260909_batch01/analysis_after_continuation/validation.json)：PASS_WITH_PROTOCOL_AMENDMENT。
@@ -45,6 +47,6 @@
 
 R13 A5与当前B同时存在代码版本、采样温度/组成、optimizer、GPU/worker拓扑和配置/观测记录路径差异；71与66的差值不隔离其中任何单因素。当前B缺少同批A，不补写配对bootstrap/McNemar。confidence48也不替代完整new128。
 
-仓库official_navida_c_full有1839准备包，但结果根本次未发现对应完整运行目录；保持UNKNOWN。多个smoke、retry及aborted启动目录只列存在性，不据名称填结果。会议、用户转述以及旧论文草稿数字不能替代原始stats与验收。
+仓库official_navida_c_full的1839准备包已有完成的全量C0结果，对应本页新增行；原始启动脚本的分支锁在封存准备包中按新HEAD调整，算法与评估协议未变。2026-09-12 的C0 selection600尝试在worker分别完成5条和8条时按用户要求中止，不与全量结果合并。其他smoke、retry及aborted启动目录只列存在性，不据名称填结果。会议、用户转述以及旧论文草稿数字不能替代原始stats与验收。
 
 后续可复现的新实验应保留同批命令、manifest、环境和资产SHA256、ID顺序/分片、物理GPU UUID、exit code及重试/amendment。旧包是证据，不能改写成适配整理后的新HEAD。
