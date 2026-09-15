@@ -244,22 +244,33 @@ class TrajectoryConsensusUpdater:
         completion_mask: torch.Tensor,
         completion: str,
     ) -> Tuple[torch.Tensor, bool]:
-        """Mask only answer/action tokens without changing generated token IDs.
+        """Mask only action tokens that can be executed from this generation.
 
-        Plain action-only generations already consist entirely of action tokens.
-        Tagged completions must expose an exact tokenized answer subsequence; if
-        they do not, gated mode skips the update rather than training unrelated
-        explanation or formatting tokens.
+        The evaluator parses at most two comma-separated chunks and execution
+        ends at STOP.  Require an exact token match when truncating a completion;
+        if the tokenizer merges across that boundary, gated mode skips the update
+        rather than scoring tokens belonging to an unexecuted action.
         """
         answer_match = re.search(r"<answer>(.*?)</answer>", completion, flags=re.DOTALL)
-        if answer_match is None:
-            # Current NaVIDA generations are plain action strings.  In that
-            # case the whole textual completion is the action span, but EOS is
-            # a sequence-control token rather than part of the navigation action.
+        action_text = answer_match.group(1) if answer_match else completion
+        chunks = [
+            match for match in re.finditer(r"[^,]+", action_text)
+            if match.group().strip()
+        ]
+        executed_chunks = []
+        for match in chunks[:2]:
+            executed_chunks.append(match)
+            if self._extract_action(match.group())[0] == 0:
+                break
+        if answer_match is None and len(executed_chunks) == len(chunks):
+            # A plain completion with no unused chunks needs no retokenization.
             mask = completion_mask.clone()
             mask[completion_ids == self.processor.tokenizer.eos_token_id] = 0
             return mask, bool(mask.sum().item())
-        answer = answer_match.group(1).strip()
+        answer = (
+            action_text[:executed_chunks[-1].end()].strip()
+            if executed_chunks else ""
+        )
         if not answer:
             return torch.zeros_like(completion_mask), False
         token_ids = completion_ids.detach().cpu().tolist()
@@ -270,7 +281,7 @@ class TrajectoryConsensusUpdater:
                 candidate_text, add_special_tokens=False
             )
             start = self._find_subsequence(token_ids, encoded)
-            if start is None:
+            if start is None or (answer_match is None and start != 0):
                 continue
             mask = torch.zeros_like(completion_mask)
             mask[start:start + len(encoded)] = 1
@@ -545,6 +556,12 @@ class TrajectoryConsensusUpdater:
         action_span_masks, action_spans_available = self._action_span_masks(
             completion_id_batches, completion_masks, completions
         ) if self.action_span_only else (completion_masks, [True] * len(completions))
+        action_span_token_counts = [
+            int(mask.sum().item()) for batch in action_span_masks for mask in batch
+        ]
+        completion_token_counts = [
+            int(mask.sum().item()) for batch in completion_masks for mask in batch
+        ]
         quality_scores = [0.0] * len(actions)
         frozen_candidate_mean_logps = None
         cluster_members: List[int] = []
@@ -571,7 +588,10 @@ class TrajectoryConsensusUpdater:
                 del frozen_logp_batches
             self._restore_parameter_snapshot(current_snapshot)
             frozen_candidate_mean_logps = [float(value) for value in frozen_means]
-            confidence_scores = self._normalized_scores(frozen_means)
+            confidence_scores = (
+                self._normalized_scores(frozen_means)
+                if all(action_spans_available) else [0.0] * len(actions)
+            )
             quality_scores = [
                 float(max(-1.0, min(1.0, confidence - self._behavior_penalty(action))))
                 for confidence, action in zip(confidence_scores, actions)
@@ -592,7 +612,7 @@ class TrajectoryConsensusUpdater:
             selected_candidate_index = max(
                 cluster_members,
                 key=lambda index: (combined_rewards[index], -index),
-            ) if cluster_members else selected_candidate_index
+            ) if cluster_members and all(action_spans_available) else selected_candidate_index
             selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
         else:
             update_eligible, update_gate_reason, reward_std, reward_margin = self._update_gate(
@@ -755,7 +775,7 @@ class TrajectoryConsensusUpdater:
             "quality_scores": quality_scores,
             "frozen_candidate_mean_logps": frozen_candidate_mean_logps,
             "candidate_confidence_definition": (
-                "episode_initial_adapter_length_normalized_action_token_mean_logp"
+                "episode_initial_adapter_length_normalized_executed_action_prefix_token_mean_logp"
                 if frozen_candidate_mean_logps is not None else None
             ),
             "combined_rewards": combined_rewards,
@@ -789,6 +809,8 @@ class TrajectoryConsensusUpdater:
             "adapter_delta_norm": adapter_delta_norm,
             "action_span_only": self.action_span_only,
             "action_spans_available": action_spans_available,
+            "action_span_token_counts": action_span_token_counts,
+            "completion_token_counts": completion_token_counts,
             "pairwise_beta": self.pairwise_beta,
             "reward_geometry": self.reward_geometry,
             "orientation_distance_scale": self.orientation_distance_scale,

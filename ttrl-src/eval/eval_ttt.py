@@ -665,6 +665,8 @@ class NaVIDA_Agent(Agent):
             "adapter_delta_norm": update_result["adapter_delta_norm"],
             "action_span_only": update_result["action_span_only"],
             "action_spans_available": update_result["action_spans_available"],
+            "action_span_token_counts": update_result["action_span_token_counts"],
+            "completion_token_counts": update_result["completion_token_counts"],
             "reward_geometry": update_result["reward_geometry"],
             "orientation_distance_scale": update_result["orientation_distance_scale"],
             "stop_distance_penalty": update_result["stop_distance_penalty"],

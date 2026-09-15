@@ -51,6 +51,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
                     "forward 75 cm": [5],
                     "turn left 15 degree": [4],
                     "turn right 15 degree": [6],
+                    "forward 25 cm, turn left 15 degree": [3, 4],
+                    "forward 25 cm, stop": [3, 7],
                 }
                 return mapping.get(normalized, [7])
 
@@ -343,12 +345,14 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         )
         self.assertEqual(result["reward_geometry"], "se2_stop")
         self.assertEqual(len(result["frozen_candidate_mean_logps"]), 3)
+        self.assertEqual(result["action_span_token_counts"], [1, 1, 1])
+        self.assertEqual(result["completion_token_counts"], [2, 2, 2])
         self.assertTrue(all(math.isfinite(value) for value in result[
             "frozen_candidate_mean_logps"
         ]))
         self.assertEqual(
             result["candidate_confidence_definition"],
-            "episode_initial_adapter_length_normalized_action_token_mean_logp",
+            "episode_initial_adapter_length_normalized_executed_action_prefix_token_mean_logp",
         )
         self.assertEqual(result["cluster_members"], [0, 1])
         self.assertEqual(result["cluster_outlier"], 2)
@@ -624,6 +628,42 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         )
         self.assertTrue(plain_available)
         self.assertEqual(plain_mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+    def test_action_span_mask_excludes_unexecuted_third_chunk_and_post_stop(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, action_span_only=True
+        )
+        mask, available = updater._action_span_mask(
+            torch.tensor([3, 4, 5, 0]), torch.ones(4),
+            "forward 25 cm, turn left 15 degree, forward 75 cm",
+        )
+        self.assertTrue(available)
+        self.assertEqual(mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+        stop_mask, stop_available = updater._action_span_mask(
+            torch.tensor([3, 7, 5, 0]), torch.ones(4),
+            "forward 25 cm, stop, forward 75 cm",
+        )
+        self.assertTrue(stop_available)
+        self.assertEqual(stop_mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+        tagged_mask, tagged_available = updater._action_span_mask(
+            torch.tensor([6, 3, 4, 5, 7, 0]), torch.ones(6),
+            "reason <answer>forward 25 cm, turn left 15 degree, forward 75 cm</answer>",
+        )
+        self.assertTrue(tagged_available)
+        self.assertEqual(tagged_mask.tolist(), [0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+
+    def test_action_span_mask_rejects_unaligned_prefix(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, action_span_only=True
+        )
+        mask, available = updater._action_span_mask(
+            torch.tensor([6, 4, 5, 0]), torch.ones(4),
+            "forward 25 cm, turn left 15 degree, forward 75 cm",
+        )
+        self.assertFalse(available)
+        self.assertEqual(mask.tolist(), [0.0] * 4)
 
     def test_gated_action_span_unavailable_skips_without_fallback_training(self):
         model, updater = self._updater(
