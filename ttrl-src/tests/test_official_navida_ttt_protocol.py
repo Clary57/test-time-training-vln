@@ -81,6 +81,7 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "max_adapter_delta_norm", "pairwise_beta",
             "reward_geometry", "orientation_distance_scale",
             "stop_distance_penalty", "candidate_sampling",
+            "canonical_temperature", "gate_controls_execution",
             "cluster_quality_weight", "max_cluster_ratio",
             "min_cluster_quality_margin",
         ):
@@ -113,6 +114,11 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
         self.assertEqual(differing_fields, {"reward_geometry", "candidate_sampling"})
         self.assertEqual(profiles["a5"]["reward_geometry"], "se2_stop")
         self.assertEqual(profiles["a5"]["candidate_sampling"], "greedy_plus_stochastic")
+        self.assertEqual(
+            profiles["a5_2"]["candidate_sampling"], "canonical_plus_stochastic"
+        )
+        self.assertEqual(profiles["a5_2"]["canonical_temperature"], 0.2)
+        self.assertTrue(profiles["a5_2"]["gate_controls_execution"])
 
         custom = SimpleNamespace(ttrl_profile="custom", update_policy="legacy")
         self.assertIs(namespace["apply_ttrl_profile"](custom), custom)
@@ -133,6 +139,7 @@ class OfficialNaVIDATTRLProtocolTests(unittest.TestCase):
             "--max-adapter-delta-norm", "--pairwise-beta",
             "--reward-geometry", "--orientation-distance-scale",
             "--stop-distance-penalty", "--candidate-sampling",
+            "--canonical-temperature", "--gate-controls-execution",
             "--cluster-quality-weight", "--max-cluster-ratio",
             "--min-cluster-quality-margin",
         ):

@@ -137,6 +137,18 @@ TTRL_PROFILES = {
         "max_cluster_ratio": 0.5,
         "min_cluster_quality_margin": 0.0,
     },
+    "a5_2": {
+        "update_policy": "cluster_gated",
+        "action_span_only": True,
+        "max_updates_per_episode": 5,
+        "reward_geometry": "se2_stop",
+        "candidate_sampling": "canonical_plus_stochastic",
+        "canonical_temperature": 0.2,
+        "gate_controls_execution": True,
+        "cluster_quality_weight": 0.25,
+        "max_cluster_ratio": 0.5,
+        "min_cluster_quality_margin": 0.0,
+    },
 }
 
 
@@ -188,6 +200,7 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                     orientation_distance_scale=0.25 / math.radians(15.0),
                     stop_distance_penalty=0.25,
                     candidate_sampling="all_stochastic",
+                    canonical_temperature=0.2, gate_controls_execution=False,
                     cluster_quality_weight=0.25, max_cluster_ratio=0.5,
                     min_cluster_quality_margin=0.0) -> None:
     log_path = os.path.join(result_path, "log")
@@ -230,6 +243,8 @@ def evaluate_agent(config, split_id, dataset, model_path, lora_path, result_path
                         orientation_distance_scale=orientation_distance_scale,
                         stop_distance_penalty=stop_distance_penalty,
                         candidate_sampling=candidate_sampling,
+                        canonical_temperature=canonical_temperature,
+                        gate_controls_execution=gate_controls_execution,
                         cluster_quality_weight=cluster_quality_weight,
                         max_cluster_ratio=max_cluster_ratio,
                         min_cluster_quality_margin=min_cluster_quality_margin)
@@ -335,6 +350,7 @@ class NaVIDA_Agent(Agent):
                     orientation_distance_scale=0.25 / math.radians(15.0),
                     stop_distance_penalty=0.25,
                     candidate_sampling="all_stochastic",
+                    canonical_temperature=0.2, gate_controls_execution=False,
                     cluster_quality_weight=0.25, max_cluster_ratio=0.5,
                     min_cluster_quality_margin=0.0):
         
@@ -400,6 +416,8 @@ class NaVIDA_Agent(Agent):
             orientation_distance_scale=orientation_distance_scale,
             stop_distance_penalty=stop_distance_penalty,
             candidate_sampling=candidate_sampling,
+            canonical_temperature=canonical_temperature,
+            gate_controls_execution=gate_controls_execution,
             cluster_quality_weight=cluster_quality_weight,
             max_cluster_ratio=max_cluster_ratio,
             min_cluster_quality_margin=min_cluster_quality_margin,
@@ -672,6 +690,12 @@ class NaVIDA_Agent(Agent):
             "stop_distance_penalty": update_result["stop_distance_penalty"],
             "candidate_sampling": update_result["candidate_sampling"],
             "candidate_sampling_modes": update_result["candidate_sampling_modes"],
+            "canonical_temperature": update_result["canonical_temperature"],
+            "gate_controls_execution": update_result["gate_controls_execution"],
+            "cluster_execution_trusted": update_result["cluster_execution_trusted"],
+            "execution_selection_reason": update_result["execution_selection_reason"],
+            "candidate_actions": update_result.get("candidate_actions"),
+            "selected_candidate_index": update_result.get("selected_candidate_index"),
             "quality_scores": update_result["quality_scores"],
             "frozen_candidate_mean_logps": update_result[
                 "frozen_candidate_mean_logps"
@@ -756,8 +780,8 @@ def main():
                         help="write default-off atomic action provenance JSONL")
     parser.add_argument("--official-navida-protocol",action="store_true",
                         help="match official NaVIDA prompt inputs; requires history 200")
-    parser.add_argument("--ttrl-profile",choices=("custom", "a4", "a5"),default="custom",
-                        help="named protocol preset; a5 adds se2/stop geometry and hybrid sampling to a4")
+    parser.add_argument("--ttrl-profile",choices=("custom", "a4", "a5", "a5_2"),default="custom",
+                        help="named protocol preset; a5_2 makes gate rejection control execution")
     parser.add_argument("--update-policy",choices=("legacy", "gated", "cluster_gated"),default="legacy",
                         help="legacy always steps; gated requires reliable consensus")
     parser.add_argument("--min-reward-std",type=float,default=0.2)
@@ -779,9 +803,14 @@ def main():
     parser.add_argument("--stop-distance-penalty",type=float,default=0.25,
                         help="meters assigned to a stop-state mismatch")
     parser.add_argument("--candidate-sampling",
-                        choices=("all_stochastic", "greedy_plus_stochastic"),
+                        choices=("all_stochastic", "greedy_plus_stochastic",
+                                 "canonical_plus_stochastic"),
                         default="all_stochastic",
                         help="candidate generation composition in stable order")
+    parser.add_argument("--canonical-temperature",type=float,default=0.2,
+                        help="temperature of candidate 0 in canonical_plus_stochastic mode")
+    parser.add_argument("--gate-controls-execution",action="store_true",
+                        help="execute a trusted cluster and otherwise fall back to candidate 0")
     parser.add_argument("--cluster-quality-weight",type=float,default=0.25)
     parser.add_argument("--max-cluster-ratio",type=float,default=0.5)
     parser.add_argument("--min-cluster-quality-margin",type=float,default=0.0)
@@ -810,6 +839,10 @@ def main():
         raise ValueError("pairwise-beta must be positive")
     if args.orientation_distance_scale < 0 or args.stop_distance_penalty < 0:
         raise ValueError("trajectory distance scales must be non-negative")
+    if args.canonical_temperature <= 0:
+        raise ValueError("canonical-temperature must be positive")
+    if args.gate_controls_execution and args.candidate_sampling != "canonical_plus_stochastic":
+        raise ValueError("gate-controls-execution requires canonical_plus_stochastic sampling")
     if not 0 <= args.cluster_quality_weight <= 1:
         raise ValueError("cluster-quality-weight must be in [0, 1]")
     if not 0 <= args.max_cluster_ratio <= 1 or args.min_cluster_quality_margin < 0:
@@ -900,6 +933,8 @@ def main():
             "orientation_distance_scale": args.orientation_distance_scale,
             "stop_distance_penalty": args.stop_distance_penalty,
             "candidate_sampling": args.candidate_sampling,
+            "canonical_temperature": args.canonical_temperature,
+            "gate_controls_execution": args.gate_controls_execution,
             "cluster_quality_weight": args.cluster_quality_weight,
             "max_cluster_ratio": args.max_cluster_ratio,
             "min_cluster_quality_margin": args.min_cluster_quality_margin,
@@ -916,6 +951,7 @@ def main():
                 args.anchor_l2_weight, args.max_adapter_delta_norm, args.pairwise_beta,
                 args.reward_geometry, args.orientation_distance_scale,
                 args.stop_distance_penalty, args.candidate_sampling,
+                args.canonical_temperature, args.gate_controls_execution,
                 args.cluster_quality_weight, args.max_cluster_ratio,
                 args.min_cluster_quality_margin)
 

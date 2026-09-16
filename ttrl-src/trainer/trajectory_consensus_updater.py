@@ -51,6 +51,8 @@ class TrajectoryConsensusUpdater:
         orientation_distance_scale: float = 0.25 / math.radians(15.0),
         stop_distance_penalty: float = 0.25,
         candidate_sampling: str = "all_stochastic",
+        canonical_temperature: float = 0.2,
+        gate_controls_execution: bool = False,
         cluster_quality_weight: float = 0.25,
         max_cluster_ratio: float = 0.5,
         min_cluster_quality_margin: float = 0.0,
@@ -83,9 +85,18 @@ class TrajectoryConsensusUpdater:
             raise ValueError("reward_geometry must be 'xy' or 'se2_stop'")
         if orientation_distance_scale < 0 or stop_distance_penalty < 0:
             raise ValueError("trajectory distance scales must be non-negative")
-        if candidate_sampling not in {"all_stochastic", "greedy_plus_stochastic"}:
+        if candidate_sampling not in {
+            "all_stochastic", "greedy_plus_stochastic", "canonical_plus_stochastic"
+        }:
             raise ValueError(
-                "candidate_sampling must be 'all_stochastic' or 'greedy_plus_stochastic'"
+                "candidate_sampling must be 'all_stochastic', "
+                "'greedy_plus_stochastic', or 'canonical_plus_stochastic'"
+            )
+        if canonical_temperature <= 0:
+            raise ValueError("canonical_temperature must be positive")
+        if gate_controls_execution and candidate_sampling != "canonical_plus_stochastic":
+            raise ValueError(
+                "gate_controls_execution requires canonical_plus_stochastic sampling"
             )
         if not 0 <= cluster_quality_weight <= 1:
             raise ValueError("cluster_quality_weight must be in [0, 1]")
@@ -103,6 +114,8 @@ class TrajectoryConsensusUpdater:
         self.orientation_distance_scale = orientation_distance_scale
         self.stop_distance_penalty = stop_distance_penalty
         self.candidate_sampling = candidate_sampling
+        self.canonical_temperature = canonical_temperature
+        self.gate_controls_execution = gate_controls_execution
         self.cluster_quality_weight = cluster_quality_weight
         self.max_cluster_ratio = max_cluster_ratio
         self.min_cluster_quality_margin = min_cluster_quality_margin
@@ -146,17 +159,33 @@ class TrajectoryConsensusUpdater:
                 configs.append(config)
             return configs
 
-        greedy = GenerationConfig.from_dict(self.generation_config.to_dict())
-        greedy.do_sample = False
-        greedy.num_return_sequences = 1
+        anchor = GenerationConfig.from_dict(self.generation_config.to_dict())
+        anchor.num_return_sequences = 1
+        if self.candidate_sampling == "greedy_plus_stochastic":
+            anchor.do_sample = False
+        else:
+            anchor.do_sample = True
+            anchor.temperature = self.canonical_temperature
         if self.num_generations == 1:
-            return [greedy]
+            return [anchor]
         stochastic = []
         for _ in range(self.num_generations - 1):
             config = GenerationConfig.from_dict(self.generation_config.to_dict())
             config.num_return_sequences = 1
             stochastic.append(config)
-        return [greedy, *stochastic]
+        return [anchor, *stochastic]
+
+    def _candidate_sampling_modes(
+        self, configs: Sequence[GenerationConfig]
+    ) -> List[str]:
+        modes = [
+            "stochastic" if config.do_sample else "greedy"
+            for config in configs
+            for _ in range(config.num_return_sequences)
+        ]
+        if self.candidate_sampling == "canonical_plus_stochastic" and modes:
+            modes[0] = "canonical_low_temperature"
+        return modes
 
     def _new_optimizer(self) -> torch.optim.Optimizer:
         return torch.optim.AdamW(
@@ -401,6 +430,17 @@ class TrajectoryConsensusUpdater:
             return False, "episode_update_limit_reached", [first, second], outlier, ratio, quality_margin
         return True, "eligible_cluster", [first, second], outlier, ratio, quality_margin
 
+    @staticmethod
+    def _cluster_trusted_for_execution(update_gate_reason: str) -> bool:
+        """Separate cluster reliability from the optimizer update budget."""
+        return update_gate_reason in {"eligible_cluster", "episode_update_limit_reached"}
+
+    @staticmethod
+    def _canonical_fallback_index(valid: Sequence[bool]) -> int | None:
+        if valid and valid[0]:
+            return 0
+        return next((index for index, is_valid in enumerate(valid) if is_valid), None)
+
     @classmethod
     def _clone_optimizer_value_to_cpu(cls, value: Any) -> Any:
         if torch.is_tensor(value):
@@ -553,6 +593,8 @@ class TrajectoryConsensusUpdater:
         valid_count = int(sum(valid_list))
         selected_candidate_index = self._selected_candidate_index(rewards_list, valid_list)
         selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
+        execution_selection_reason = "consensus_medoid"
+        cluster_execution_trusted = False
         action_span_masks, action_spans_available = self._action_span_masks(
             completion_id_batches, completion_masks, completions
         ) if self.action_span_only else (completion_masks, [True] * len(completions))
@@ -609,10 +651,27 @@ class TrajectoryConsensusUpdater:
                 + self.cluster_quality_weight * quality
                 for reward, quality in zip(rewards_list, quality_scores)
             ]
-            selected_candidate_index = max(
-                cluster_members,
-                key=lambda index: (combined_rewards[index], -index),
-            ) if cluster_members and all(action_spans_available) else selected_candidate_index
+            cluster_execution_trusted = self._cluster_trusted_for_execution(
+                update_gate_reason
+            )
+            if self.gate_controls_execution and not cluster_execution_trusted:
+                fallback_index = self._canonical_fallback_index(valid_list)
+                if fallback_index is not None:
+                    selected_candidate_index = fallback_index
+                    execution_selection_reason = (
+                        "canonical_fallback" if fallback_index == 0
+                        else "first_valid_fallback"
+                    )
+                else:
+                    execution_selection_reason = "invalid_generation_random_fallback"
+            elif cluster_members and all(action_spans_available):
+                selected_candidate_index = max(
+                    cluster_members,
+                    key=lambda index: (combined_rewards[index], -index),
+                )
+                execution_selection_reason = (
+                    "trusted_cluster" if self.gate_controls_execution else "cluster_pair"
+                )
             selected_actions = self._actions_for_selected_index(actions, selected_candidate_index)
         else:
             update_eligible, update_gate_reason, reward_std, reward_margin = self._update_gate(
@@ -816,11 +875,13 @@ class TrajectoryConsensusUpdater:
             "orientation_distance_scale": self.orientation_distance_scale,
             "stop_distance_penalty": self.stop_distance_penalty,
             "candidate_sampling": self.candidate_sampling,
-            "candidate_sampling_modes": [
-                "stochastic" if config.do_sample else "greedy"
-                for config in candidate_generation_configs
-                for _ in range(config.num_return_sequences)
-            ],
+            "candidate_sampling_modes": self._candidate_sampling_modes(
+                candidate_generation_configs
+            ),
+            "canonical_temperature": self.canonical_temperature,
+            "gate_controls_execution": self.gate_controls_execution,
+            "cluster_execution_trusted": cluster_execution_trusted,
+            "execution_selection_reason": execution_selection_reason,
             "completions": completions,
         }
         if self.trace_metadata_enabled:

@@ -203,6 +203,26 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
         self.assertEqual(result["candidate_actions"], [[1], [2], [1, 1, 1]])
 
+    def test_canonical_anchor_uses_low_temperature_before_exploration_candidates(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {3: "forward 25 cm", 4: "turn left 15 degree", 5: "forward 75 cm"},
+            candidate_sampling="canonical_plus_stochastic",
+            canonical_temperature=0.2,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("canonical-anchor")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(model.generate_calls, 3)
+        self.assertEqual([config.do_sample for config in model.generate_configs], [True] * 3)
+        self.assertEqual(model.generate_configs[0].temperature, 0.2)
+        self.assertEqual(model.generate_configs[1].temperature, 0.3)
+        self.assertEqual(
+            result["candidate_sampling_modes"],
+            ["canonical_low_temperature", "stochastic", "stochastic"],
+        )
+
     def test_se2_stop_distance_distinguishes_orientation_and_stop(self):
         _, legacy = self._updater([3], {3: "forward 25 cm"})
         _, se2 = self._updater(
@@ -274,6 +294,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         for kwargs in (
             {"reward_geometry": "unknown"},
             {"candidate_sampling": "unknown"},
+            {"canonical_temperature": 0.0},
+            {"gate_controls_execution": True},
             {"orientation_distance_scale": -1.0},
             {"stop_distance_penalty": -1.0},
             {"cluster_quality_weight": 1.1},
@@ -319,6 +341,56 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertFalse(result["optimizer_step_executed"])
         self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
         self.assertLess(result["cluster_quality_margin"], 0.0)
+
+    def test_rejected_cluster_falls_back_to_canonical_candidate(self):
+        _, updater = self._updater(
+            [4, 3, 3],
+            {3: "forward 25 cm", 4: "turn left 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            candidate_sampling="canonical_plus_stochastic",
+            canonical_temperature=0.2,
+            gate_controls_execution=True,
+            cluster_quality_weight=0.25,
+            min_cluster_quality_margin=0.0,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("rejected-cluster-canonical-fallback")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(result["cluster_members"], [1, 2])
+        self.assertEqual(result["cluster_outlier"], 0)
+        self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
+        self.assertFalse(result["cluster_execution_trusted"])
+        self.assertEqual(result["execution_selection_reason"], "canonical_fallback")
+        self.assertEqual(result["selected_candidate_index"], 0)
+        self.assertEqual(result["selected_actions"], [2])
+        self.assertFalse(result["optimizer_step_executed"])
+
+    def test_update_limit_does_not_turn_a_trusted_cluster_into_a_fallback(self):
+        _, updater = self._updater(
+            [3, 6, 6],
+            {3: "forward 25 cm", 6: "turn right 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            max_updates_per_episode=1,
+            candidate_sampling="canonical_plus_stochastic",
+            gate_controls_execution=True,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("trusted-cluster-after-update-limit")
+        first = updater.adapt_step(self._inputs())
+        second = updater.adapt_step(self._inputs())
+
+        self.assertTrue(first["update_eligible"])
+        self.assertEqual(first["execution_selection_reason"], "trusted_cluster")
+        self.assertFalse(second["update_eligible"])
+        self.assertEqual(second["update_gate_reason"], "episode_update_limit_reached")
+        self.assertTrue(second["cluster_execution_trusted"])
+        self.assertEqual(second["execution_selection_reason"], "trusted_cluster")
+        self.assertIn(second["selected_candidate_index"], [1, 2])
+        self.assertEqual(second["selected_actions"], [3])
+        self.assertFalse(second["optimizer_step_executed"])
 
     def test_a5_components_work_together_under_cluster_gate(self):
         model, updater = self._updater(
