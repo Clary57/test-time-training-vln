@@ -51,6 +51,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
                     "forward 75 cm": [5],
                     "turn left 15 degree": [4],
                     "turn right 15 degree": [6],
+                    "forward 25 cm, turn left 15 degree": [3, 4],
+                    "forward 25 cm, stop": [3, 7],
                 }
                 return mapping.get(normalized, [7])
 
@@ -201,6 +203,26 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
         self.assertEqual(result["candidate_actions"], [[1], [2], [1, 1, 1]])
 
+    def test_canonical_anchor_uses_low_temperature_before_exploration_candidates(self):
+        model, updater = self._updater(
+            [3, 4, 5],
+            {3: "forward 25 cm", 4: "turn left 15 degree", 5: "forward 75 cm"},
+            candidate_sampling="canonical_plus_stochastic",
+            canonical_temperature=0.2,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("canonical-anchor")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(model.generate_calls, 3)
+        self.assertEqual([config.do_sample for config in model.generate_configs], [True] * 3)
+        self.assertEqual(model.generate_configs[0].temperature, 0.2)
+        self.assertEqual(model.generate_configs[1].temperature, 0.3)
+        self.assertEqual(
+            result["candidate_sampling_modes"],
+            ["canonical_low_temperature", "stochastic", "stochastic"],
+        )
+
     def test_se2_stop_distance_distinguishes_orientation_and_stop(self):
         _, legacy = self._updater([3], {3: "forward 25 cm"})
         _, se2 = self._updater(
@@ -272,6 +294,8 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         for kwargs in (
             {"reward_geometry": "unknown"},
             {"candidate_sampling": "unknown"},
+            {"canonical_temperature": 0.0},
+            {"gate_controls_execution": True},
             {"orientation_distance_scale": -1.0},
             {"stop_distance_penalty": -1.0},
             {"cluster_quality_weight": 1.1},
@@ -318,6 +342,56 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
         self.assertLess(result["cluster_quality_margin"], 0.0)
 
+    def test_rejected_cluster_falls_back_to_canonical_candidate(self):
+        _, updater = self._updater(
+            [4, 3, 3],
+            {3: "forward 25 cm", 4: "turn left 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            candidate_sampling="canonical_plus_stochastic",
+            canonical_temperature=0.2,
+            gate_controls_execution=True,
+            cluster_quality_weight=0.25,
+            min_cluster_quality_margin=0.0,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("rejected-cluster-canonical-fallback")
+        result = updater.adapt_step(self._inputs())
+
+        self.assertEqual(result["cluster_members"], [1, 2])
+        self.assertEqual(result["cluster_outlier"], 0)
+        self.assertEqual(result["update_gate_reason"], "cluster_quality_below_outlier")
+        self.assertFalse(result["cluster_execution_trusted"])
+        self.assertEqual(result["execution_selection_reason"], "canonical_fallback")
+        self.assertEqual(result["selected_candidate_index"], 0)
+        self.assertEqual(result["selected_actions"], [2])
+        self.assertFalse(result["optimizer_step_executed"])
+
+    def test_update_limit_does_not_turn_a_trusted_cluster_into_a_fallback(self):
+        _, updater = self._updater(
+            [3, 6, 6],
+            {3: "forward 25 cm", 6: "turn right 15 degree"},
+            update_policy="cluster_gated",
+            action_span_only=True,
+            max_updates_per_episode=1,
+            candidate_sampling="canonical_plus_stochastic",
+            gate_controls_execution=True,
+            trace_metadata_enabled=True,
+        )
+        updater.reset_episode("trusted-cluster-after-update-limit")
+        first = updater.adapt_step(self._inputs())
+        second = updater.adapt_step(self._inputs())
+
+        self.assertTrue(first["update_eligible"])
+        self.assertEqual(first["execution_selection_reason"], "trusted_cluster")
+        self.assertFalse(second["update_eligible"])
+        self.assertEqual(second["update_gate_reason"], "episode_update_limit_reached")
+        self.assertTrue(second["cluster_execution_trusted"])
+        self.assertEqual(second["execution_selection_reason"], "trusted_cluster")
+        self.assertIn(second["selected_candidate_index"], [1, 2])
+        self.assertEqual(second["selected_actions"], [3])
+        self.assertFalse(second["optimizer_step_executed"])
+
     def test_a5_components_work_together_under_cluster_gate(self):
         model, updater = self._updater(
             [6, 6, 4],
@@ -342,12 +416,49 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
             result["candidate_sampling_modes"], ["greedy", "stochastic", "stochastic"]
         )
         self.assertEqual(result["reward_geometry"], "se2_stop")
+        self.assertEqual(len(result["frozen_candidate_mean_logps"]), 3)
+        self.assertEqual(result["action_span_token_counts"], [1, 1, 1])
+        self.assertEqual(result["completion_token_counts"], [2, 2, 2])
+        self.assertTrue(all(math.isfinite(value) for value in result[
+            "frozen_candidate_mean_logps"
+        ]))
+        self.assertEqual(
+            result["candidate_confidence_definition"],
+            "episode_initial_adapter_length_normalized_executed_action_prefix_token_mean_logp",
+        )
         self.assertEqual(result["cluster_members"], [0, 1])
         self.assertEqual(result["cluster_outlier"], 2)
         self.assertTrue(result["update_eligible"])
         self.assertTrue(result["optimizer_step_executed"])
         self.assertEqual(result["selected_actions"], [3])
         self.assertEqual([config.do_sample for config in model.generate_configs], [False, True, True])
+
+    def test_confidence_observability_does_not_change_actions_updates_or_rng(self):
+        outcomes = []
+        for trace_enabled in (False, True):
+            model, updater = self._updater(
+                [3, 3, 4],
+                {3: "forward 25 cm", 4: "turn left 15 degree"},
+                update_policy="cluster_gated",
+                action_span_only=True,
+                cluster_quality_weight=0.25,
+                trace_metadata_enabled=trace_enabled,
+            )
+            updater.reset_episode("confidence-observability")
+            before_rng = torch.random.get_rng_state().clone()
+            result = updater.adapt_step(self._inputs())
+            outcomes.append((
+                result["selected_actions"],
+                result["rewards"],
+                result["quality_scores"],
+                result["frozen_candidate_mean_logps"],
+                result["optimizer_step_executed"],
+                torch.random.get_rng_state().clone(),
+                before_rng,
+            ))
+        self.assertEqual(outcomes[0][0:5], outcomes[1][0:5])
+        self.assertTrue(torch.equal(outcomes[0][5], outcomes[1][5]))
+        self.assertTrue(torch.equal(outcomes[0][6], outcomes[1][6]))
 
     def test_cluster_reference_scoring_does_not_change_default_behavior(self):
         outcomes = []
@@ -589,6 +700,42 @@ class TrajectoryConsensusUpdaterTests(unittest.TestCase):
         )
         self.assertTrue(plain_available)
         self.assertEqual(plain_mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+    def test_action_span_mask_excludes_unexecuted_third_chunk_and_post_stop(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, action_span_only=True
+        )
+        mask, available = updater._action_span_mask(
+            torch.tensor([3, 4, 5, 0]), torch.ones(4),
+            "forward 25 cm, turn left 15 degree, forward 75 cm",
+        )
+        self.assertTrue(available)
+        self.assertEqual(mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+        stop_mask, stop_available = updater._action_span_mask(
+            torch.tensor([3, 7, 5, 0]), torch.ones(4),
+            "forward 25 cm, stop, forward 75 cm",
+        )
+        self.assertTrue(stop_available)
+        self.assertEqual(stop_mask.tolist(), [1.0, 1.0, 0.0, 0.0])
+
+        tagged_mask, tagged_available = updater._action_span_mask(
+            torch.tensor([6, 3, 4, 5, 7, 0]), torch.ones(6),
+            "reason <answer>forward 25 cm, turn left 15 degree, forward 75 cm</answer>",
+        )
+        self.assertTrue(tagged_available)
+        self.assertEqual(tagged_mask.tolist(), [0.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+
+    def test_action_span_mask_rejects_unaligned_prefix(self):
+        _, updater = self._updater(
+            [3], {3: "forward 25 cm"}, action_span_only=True
+        )
+        mask, available = updater._action_span_mask(
+            torch.tensor([6, 4, 5, 0]), torch.ones(4),
+            "forward 25 cm, turn left 15 degree, forward 75 cm",
+        )
+        self.assertFalse(available)
+        self.assertEqual(mask.tolist(), [0.0] * 4)
 
     def test_gated_action_span_unavailable_skips_without_fallback_training(self):
         model, updater = self._updater(

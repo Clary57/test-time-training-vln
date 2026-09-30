@@ -1,0 +1,11 @@
+{
+  "base_commit": "3dcfc892c2919438eb587e5d33861ca3baf97758",
+  "method": "git mv; historical content unchanged",
+  "moves": {
+    "PROJECT_CHANGES_GUIDE.md": "docs/archive/pre_a5/PROJECT_CHANGES_GUIDE.md",
+    "VLN_TTA论文框架.md": "docs/archive/pre_a5/VLN_TTA论文框架.md",
+    "资料.md": "docs/archive/pre_a5/资料.md",
+    "plans/plan before 8.15.md": "docs/archive/pre_a5/plan before 8.15.md",
+    "ttrl-src/eval/README_ttt.md": "docs/archive/pre_a5/README_ttt_legacy.md"
+  }
+}
